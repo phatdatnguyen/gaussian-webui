@@ -1,0 +1,12 @@
+flagged/
+gaussian-env/
+structures/
+__pycache__/
+.vs/
+.clean
+
+*.log
+*.com
+*.xyz
+*.pdb
+*.autode_calculations
