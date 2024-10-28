@@ -32,6 +32,7 @@ conda activate ./gaussian-env
 conda install conda-forge::rdkit
 conda install autode -c conda-forge
 pip install cclib
+pip install plotly
 pip install gradio
 pip install gradio_molecule2d
 pip install gradio_molecule3d
