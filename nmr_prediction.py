@@ -41,7 +41,7 @@ def on_create_molecule(molecule_editor: molecule2d):
 
 def on_upload_molecule(load_molecule_uploadbutton: gr.UploadButton):
     os.makedirs("structures", exist_ok=True)
-    file_path = ".\\structures\\molecule_sp.pdb"
+    file_path = ".\\structures\\molecule_nmr.pdb"
     uploaded_file_path = load_molecule_uploadbutton
     _, file_extension = os.path.splitext(uploaded_file_path)
 
@@ -349,10 +349,18 @@ def on_nmr_predict(solvation_checkbox: gr.Checkbox, solvent_dropdown: gr.Dropdow
 
     except Exception as exc:
         gr.Warning("Calculation error!\n" + str(exc))
-        return [None, None, None, None]
+        export_nmr_button = gr.Button(value="Export", interactive=False)
+        return [None, None, None, None, export_nmr_button]
 
     calculation_status = "Calculation finished. ({0:.3f} s)".format(duration)
-    return calculation_status, nmr_df, nmr_spectrum_1H, nmr_spectrum_13C
+    export_nmr_button = gr.Button(value="Export", interactive=True)
+    return calculation_status, nmr_df, nmr_spectrum_1H, nmr_spectrum_13C, export_nmr_button
+
+def on_export_nmr(nmr_dataframe: gr.Dataframe, nmr_filename_textbox: gr.Textbox):
+    file_path = nmr_filename_textbox + '.csv'
+    nmr_dataframe.to_csv(file_path)
+
+    return "NMR data exported: " + file_path
 
 reps = [
     {
@@ -387,8 +395,8 @@ def nmr_prediction_tab_content():
                                                                                             "dichloroethane", ("THF", "thf"), "aniline", "chlorobenzene", "chloroform", ("diethyl ether", "diethylether"),
                                                                                             "toluene", "benzene", ("CCl4", "ccl4"), "cyclohexane", "heptane"], allow_custom_value=True)
                 with gr.Column(scale=1):
-                    functional_textbox = gr.Dropdown(label="Functional", value="B3LYP", choices=["LSDA", "BPV86", "B3LYP", "CAM-B3LYP", "B3PW91", "B97D", "MPW1PW91", "BPEBPE", "HSEH1BPE", "HCTH", "TPSSTPSS", "WB97XD",
-                                                                                                 "M06-2X", "mPW1PW91", "uB97XD"], allow_custom_value=True)
+                    functional_textbox = gr.Dropdown(label="Functional", value="B3LYP", choices=["LSDA", "BVP86", "B3LYP", "CAM-B3LYP", "B3PW91", "B97D", "MPW1PW91", "PBEPBE", "HSEH1PBE", "HCTH", "TPSSTPSS", "WB97XD",
+                                                                                                 "M06-2X"], allow_custom_value=True)
                     basis_set_textbox = gr.Dropdown(label="Basis set", value="6-31G(d,p)", choices=["STO-3G", "3-21G", "6-31G", "6-31G'", "6-31G(d,p)", "6-31G(3d,p)", "6-31G(d,3p)", "6-31G(3d,3p)", "6-31+G(d,p)", "6-31++G(d,p)",
                                                                                                "6-311G", "6-311G(d,p)", "cc-pVDZ", "cc-pVTZ", "cc-pVQZ", "aug-cc-pVDZ", "aug-cc-pVTZ", "aug-cc-pVQZ",
                                                                                                "LanL2DZ", "LanL2MB", "SDD", "DGDZVP", "DGDZVP2", "DGTZVP", "GEN", "GENECP"], allow_custom_value=True)
@@ -407,6 +415,9 @@ def nmr_prediction_tab_content():
             with gr.Row():
                 with gr.Column(scale=1):
                     nmr_dataframe = gr.DataFrame(label="NMR signals")
+                    nmr_filename_textbox = gr.Textbox(label="File name", value="nmr_data")
+                    export_nmr_button = gr.Button(value="Export", interactive=False)
+                    export_nmr_status_markdown = gr.Markdown(value="")
                 with gr.Column(scale=2):
                     with gr.Row():    
                         nmr_spectrum_1H = gr.Plot(label="1H NMR spectrum")
@@ -419,6 +430,7 @@ def nmr_prediction_tab_content():
         predict_button.click(on_nmr_predict, [solvation_checkbox, solvent_dropdown,
                                                 functional_textbox, basis_set_textbox, charge_slider, multiplicity_dropdown,
                                                 n_cores_slider, memory_slider, file_name_textbox],
-                                               [status_markdown, nmr_dataframe, nmr_spectrum_1H, nmr_spectrum_13C])
+                                               [status_markdown, nmr_dataframe, nmr_spectrum_1H, nmr_spectrum_13C, export_nmr_button])
+        export_nmr_button.click(on_export_nmr, [nmr_dataframe, nmr_filename_textbox], export_nmr_status_markdown)
         
     return nmr_prediction_tab

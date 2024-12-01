@@ -42,7 +42,7 @@ def on_create_molecule(molecule_editor: molecule2d):
 
 def on_upload_molecule(load_molecule_uploadbutton: gr.UploadButton):
     os.makedirs("structures", exist_ok=True)
-    file_path = ".\\structures\\molecule_sp.pdb"
+    file_path = ".\\structures\\molecule_freq.pdb"
     uploaded_file_path = load_molecule_uploadbutton
     _, file_extension = os.path.splitext(uploaded_file_path)
 
@@ -264,8 +264,8 @@ def frequency_analysis_tab_content():
                                                                                             "dichloroethane", ("THF", "thf"), "aniline", "chlorobenzene", "chloroform", ("diethyl ether", "diethylether"),
                                                                                             "toluene", "benzene", ("CCl4", "ccl4"), "cyclohexane", "heptane"], allow_custom_value=True, visible=False)
                 with gr.Column(scale=1):
-                    functional_textbox = gr.Dropdown(label="Functional", value="B3LYP", choices=["LSDA", "BPV86", "B3LYP", "CAM-B3LYP", "B3PW91", "B97D", "MPW1PW91", "BPEBPE", "HSEH1BPE", "HCTH", "TPSSTPSS", "WB97XD",
-                                                                                                 "M06-2X", "mPW1PW91", "uB97XD"], allow_custom_value=True)
+                    functional_textbox = gr.Dropdown(label="Functional", value="B3LYP", choices=["LSDA", "BVP86", "B3LYP", "CAM-B3LYP", "B3PW91", "B97D", "MPW1PW91", "PBEPBE", "HSEH1PBE", "HCTH", "TPSSTPSS", "WB97XD",
+                                                                                                 "M06-2X"], allow_custom_value=True)
                     basis_set_textbox = gr.Dropdown(label="Basis set", value="6-31G(d,p)", choices=["STO-3G", "3-21G", "6-31G", "6-31G'", "6-31G(d,p)", "6-31G(3d,p)", "6-31G(d,3p)", "6-31G(3d,3p)", "6-31+G(d,p)", "6-31++G(d,p)",
                                                                                                "6-311G", "6-311G(d,p)", "cc-pVDZ", "cc-pVTZ", "cc-pVQZ", "aug-cc-pVDZ", "aug-cc-pVTZ", "aug-cc-pVQZ",
                                                                                                "LanL2DZ", "LanL2MB", "SDD", "DGDZVP", "DGDZVP2", "DGTZVP", "GEN", "GENECP"], allow_custom_value=True)
