@@ -1,12 +1,19 @@
 flagged/
 gaussian-env/
 structures/
+data/
 __pycache__/
 .vs/
 .clean
 
+*.gjf
 *.log
 *.com
+*.chk
+*.fchk
+*.csv
 *.xyz
 *.pdb
-*.autode_calculations
+*.html
+*.cube
+*.7

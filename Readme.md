@@ -3,46 +3,46 @@ This web UI is for simple computational chemistry calculations with [Gaussian 16
 
 * Single-Point Calculation
 
-
 * Geometry Optimization
-
 
 * Frequency Analysis
 
+* Absorption/Emission Spectrum Prediction
+
+* NMR Prediction
+
 
 ## Installation  (Linux only)
-You will need [Anaconda](https://www.anaconda.com/download) for this app.
 - Clone this repo: Open terminal
 
 ```
 git clone https://github.com/phatdatnguyen/gaussian-webui
 ```
 
-- Create and activate Anaconda environment:
+- Create and activate virtual environment:
 
 ```
 cd gaussian-webui
-conda create -p ./gaussian-env
-conda activate ./gaussian-env
+python3 -m venv gaussian-env
+source gaussian-env/bin/activate
 ```
 
 - Install packages:
 
 ```
-conda install conda-forge::rdkit
-conda install autode -c conda-forge
+pip install psutil
+pip install rdkit
 pip install cclib
 pip install plotly
 pip install gradio
 pip install gradio_molecule2d
-pip install gradio_molecule3d
+pip install nglview
 ```
 
 ## Start web UI
 To start the web UI:
 
 ```
-conda activate ./gaussian-env
-set PYTHONUTF8=1
-python webui.py
+source gaussian-env/bin/activate
+python3 webui.py
 ```

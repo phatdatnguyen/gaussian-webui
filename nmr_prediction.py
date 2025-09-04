@@ -8,40 +8,47 @@ import gradio as gr
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
-from gradio_molecule2d import molecule2d
-from gradio_molecule3d import Molecule3D
 from rdkit import Chem
 from rdkit.Chem import AllChem
 import re
+import nglview
 from utils import *
 
 max_n_procs = multiprocessing.cpu_count()
 max_memory = math.floor(psutil.virtual_memory().total / (1024 ** 3))
 
-def on_create_molecule(molecule_editor: molecule2d):
+def on_create_molecule(input_smiles_textbox: gr.Textbox):
     os.makedirs("structures", exist_ok=True)
-    file_path = ".\\structures\\molecule_nmr.pdb"
+    file_path = "./structures/molecule_nmr.pdb"
     try:
         global mol_nmr
-        mol_nmr = Chem.MolFromSmiles(molecule_editor)
+        mol_nmr = Chem.MolFromSmiles(input_smiles_textbox)
         mol_nmr = Chem.AddHs(mol_nmr)
-        smiles = Chem.CanonSmiles(molecule_editor)
+        smiles = Chem.CanonSmiles(input_smiles_textbox)
         AllChem.EmbedMolecule(mol_nmr)
         Chem.MolToPDBFile(mol_nmr, file_path)
 
-        predict_button = gr.Button(value="Predict", interactive=True)
+        # Create the NGL view widget
+        view = nglview.show_rdkit(mol_nmr)
+        
+        # Write the widget to HTML
+        if os.path.exists('./static/molecule_nmr.html'):
+            os.remove('./static/molecule_nmr.html')
+        nglview.write_html('./static/molecule_nmr.html', [view])
+
+        # Read the HTML file
+        timestamp = int(time.time())
+        html = f'<iframe src="/static/molecule_nmr.html?ts={timestamp}" height="300" width="400" title="NGL View"></iframe>'
     except Exception as exc:
         gr.Warning("Error!\n" + str(exc))
 
-        predict_button = gr.Button(value="Predict", interactive=False)
-
-        return [None, None, predict_button]
+        return None, None, None
     
-    return smiles, file_path, predict_button
+    return smiles, html, gr.update(interactive=True)
 
 def on_upload_molecule(load_molecule_uploadbutton: gr.UploadButton):
     os.makedirs("structures", exist_ok=True)
-    file_path = ".\\structures\\molecule_nmr.pdb"
+    file_path = "./structures/molecule_nmr.pdb"
     uploaded_file_path = load_molecule_uploadbutton
     _, file_extension = os.path.splitext(uploaded_file_path)
 
@@ -66,15 +73,23 @@ def on_upload_molecule(load_molecule_uploadbutton: gr.UploadButton):
             AllChem.EmbedMolecule(mol_nmr)
         Chem.MolToPDBFile(mol_nmr, file_path) 
 
-        predict_button = gr.Button(value="Predict", interactive=True)
+        # Create the NGL view widget
+        view = nglview.show_rdkit(mol_nmr)
+        
+        # Write the widget to HTML
+        if os.path.exists('./static/molecule_nmr.html'):
+            os.remove('./static/molecule_nmr.html')
+        nglview.write_html('./static/molecule_nmr.html', [view])
+
+        # Read the HTML file
+        timestamp = int(time.time())
+        html = f'<iframe src="/static/molecule_nmr.html?ts={timestamp}" height="300" width="400" title="NGL View"></iframe>'
     except Exception as exc:
         gr.Warning("Error!\n" + str(exc))
 
-        predict_button = gr.Button(value="Predict", interactive=False)
-
-        return [None, None, predict_button]  
+        return None, None, None
     
-    return smiles, file_path, predict_button
+    return smiles, html, gr.update(interactive=True)
 
 def on_mm_checkbox_change(mm_checkbox: gr.Checkbox):
     if mm_checkbox:
@@ -99,10 +114,6 @@ def on_solvation_checkbox_change(solvation_checkbox: gr.Checkbox):
     return solvent_dropdown
 
 def write_nmr_gaussian_input(mol, file_name, method='B3LYP', basis='6-31G(d,p)', charge=0, multiplicity=1, solvent=None, n_proc=4, memory=2):
-    # Ensure the molecule has 3D coordinates
-    if not mol.GetNumConformers():
-        raise ValueError("Molecule does not have 3D coordinates. Please generate conformers first.")
-
     # Open the file for writing
     with open(file_name + '.gjf', 'w') as f:
         # Link0 commands
@@ -350,7 +361,7 @@ def on_nmr_predict(solvation_checkbox: gr.Checkbox, solvent_dropdown: gr.Dropdow
     except Exception as exc:
         gr.Warning("Calculation error!\n" + str(exc))
         export_nmr_button = gr.Button(value="Export", interactive=False)
-        return [None, None, None, None, export_nmr_button]
+        return None, None, None, None, export_nmr_button
 
     calculation_status = "Calculation finished. ({0:.3f} s)".format(duration)
     export_nmr_button = gr.Button(value="Export", interactive=True)
@@ -362,31 +373,18 @@ def on_export_nmr(nmr_dataframe: gr.Dataframe, nmr_filename_textbox: gr.Textbox)
 
     return "NMR data exported: " + file_path
 
-reps = [
-    {
-      "model": 0,
-      "chain": "",
-      "resname": "",
-      "style": "stick",
-      "color": "whiteCarbon",
-      "residue_range": "",
-      "around": 0,
-      "byres": False,
-      "visible": False
-    }
-]
-
 def nmr_prediction_tab_content():
     with gr.Tab("NMR Prediction") as nmr_prediction_tab:
         with gr.Accordion("Molecule"):
             with gr.Row(equal_height=True):
-                with gr.Column(scale=2):
-                    molecule_editor = molecule2d(label="Molecule")
                 with gr.Column(scale=1):
+                    input_smiles_texbox = gr.Textbox(label="SMILES")
                     create_molecule_button = gr.Button(value="Create molecule")
+                with gr.Column(scale=1):
+                    load_molecule_uploadbutton = gr.UploadButton(label="Load molecule", file_types=['.pdb', '.xyz', '.mol', '.mol2', '.log'])
+                with gr.Column(scale=1):
                     smiles_texbox = gr.Textbox(label="SMILES")
-                    molecule_viewer = Molecule3D(label="Molecule", reps=reps)
-                    load_molecule_uploadbutton = gr.UploadButton(label="Load molecule")
+                    molecule_viewer = gr.HTML(label="Molecule")
         with gr.Accordion("NMR Prediction"):
             with gr.Row(equal_height=True):
                 with gr.Column(scale=1):
@@ -424,7 +422,7 @@ def nmr_prediction_tab_content():
                     with gr.Row():
                         nmr_spectrum_13C = gr.Plot(label="13C NMR spectrum")
                 
-        create_molecule_button.click(on_create_molecule, molecule_editor, [smiles_texbox, molecule_viewer, predict_button])
+        create_molecule_button.click(on_create_molecule, input_smiles_texbox, [smiles_texbox, molecule_viewer, predict_button])
         load_molecule_uploadbutton.upload(on_upload_molecule, load_molecule_uploadbutton, [smiles_texbox, molecule_viewer, predict_button])
         solvation_checkbox.change(on_solvation_checkbox_change, solvation_checkbox, solvent_dropdown)
         predict_button.click(on_nmr_predict, [solvation_checkbox, solvent_dropdown,

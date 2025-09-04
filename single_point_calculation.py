@@ -6,40 +6,46 @@ import time
 import math
 import gradio as gr
 import pandas as pd
-from gradio_molecule2d import molecule2d
-from gradio_molecule3d import Molecule3D
 from rdkit import Chem
 from rdkit.Chem import AllChem
 import cclib
+import nglview
 from utils import *
 
 max_n_procs = multiprocessing.cpu_count()
 max_memory = math.floor(psutil.virtual_memory().total / (1024 ** 3))
 
-def on_create_molecule(molecule_editor: molecule2d):
+def on_create_molecule(input_smiles_textbox: gr.Textbox):
     os.makedirs("structures", exist_ok=True)
-    file_path = ".\\structures\\molecule_sp.pdb"
+    file_path = "./structures/molecule_sp.pdb"
     try:
         global mol_sp
-        mol_sp = Chem.MolFromSmiles(molecule_editor)
+        mol_sp = Chem.MolFromSmiles(input_smiles_textbox)
         mol_sp = Chem.AddHs(mol_sp)
-        smiles = Chem.CanonSmiles(molecule_editor)
+        smiles = Chem.CanonSmiles(input_smiles_textbox)
         AllChem.EmbedMolecule(mol_sp)
         Chem.MolToPDBFile(mol_sp, file_path)
 
-        calculate_button = gr.Button(value="Calculate", interactive=True)
+        # Create the NGL view widget
+        view = nglview.show_rdkit(mol_sp)
+        
+        # Write the widget to HTML
+        if os.path.exists('./static/molecule_sp.html'):
+            os.remove('./static/molecule_sp.html')
+        nglview.write_html('./static/molecule_sp.html', [view])
+
+        # Read the HTML file
+        timestamp = int(time.time())
+        html = f'<iframe src="/static/molecule_sp.html?ts={timestamp}" height="300" width="400" title="NGL View"></iframe>'
     except Exception as exc:
         gr.Warning("Error!\n" + str(exc))
-
-        calculate_button = gr.Button(value="Calculate", interactive=False)
-
-        return [None, None, calculate_button]
+        return None, None, gr.update(interactive=False)
     
-    return smiles, file_path, calculate_button
+    return smiles, html, gr.update(interactive=True)
 
 def on_upload_molecule(load_molecule_uploadbutton: gr.UploadButton):
     os.makedirs("structures", exist_ok=True)
-    file_path = ".\\structures\\molecule_sp.pdb"
+    file_path = "./structures/molecule_sp.pdb"
     uploaded_file_path = load_molecule_uploadbutton
     _, file_extension = os.path.splitext(uploaded_file_path)
 
@@ -64,15 +70,22 @@ def on_upload_molecule(load_molecule_uploadbutton: gr.UploadButton):
             AllChem.EmbedMolecule(mol_sp)
         Chem.MolToPDBFile(mol_sp, file_path) 
 
-        calculate_button = gr.Button(value="Calculate", interactive=True)
+        # Create the NGL view widget
+        view = nglview.show_rdkit(mol_sp)
+        
+        # Write the widget to HTML
+        if os.path.exists('./static/molecule_sp.html'):
+            os.remove('./static/molecule_sp.html')
+        nglview.write_html('./static/molecule_sp.html', [view])
+
+        # Read the HTML file
+        timestamp = int(time.time())
+        html = f'<iframe src="/static/molecule_sp.html?ts={timestamp}" height="300" width="400" title="NGL View"></iframe>' 
     except Exception as exc:
         gr.Warning("Error!\n" + str(exc))
-
-        calculate_button = gr.Button(value="Calculate", interactive=False)
-
-        return [None, None, calculate_button]  
+        return None, None, gr.update(interactive=False)  
     
-    return smiles, file_path, calculate_button
+    return smiles, html, gr.update(interactive=True)
 
 def on_mm_checkbox_change(mm_checkbox: gr.Checkbox):
     if mm_checkbox:
@@ -97,10 +110,6 @@ def on_solvation_checkbox_change(solvation_checkbox: gr.Checkbox):
     return solvent_dropdown
 
 def write_sp_gaussian_input(mol, file_name, method='B3LYP', basis='6-31G(d)', charge=0, multiplicity=1, solvent=None, n_proc=4, memory=2):
-    # Ensure the molecule has 3D coordinates
-    if not mol.GetNumConformers():
-        raise ValueError("Molecule does not have 3D coordinates. Please generate conformers first.")
-
     # Open the file for writing
     with open(file_name + '.gjf', 'w') as f:
         # Link0 commands
@@ -163,45 +172,103 @@ def on_single_point_calculate(mm_checkbox: gr.Checkbox, force_field_dropdown: gr
         dipole_moment_textbox = "{:.4f} (Debye)".format(dipole_magnitude)
 
         MO_energies = data.moenergies
+        visualization_dropdown_choices=["Electron density", "Electrostatic potential"]
         MO_df = pd.DataFrame(columns=["Molecular orbital", "Energy (hartree)"])
         for i, MO_energy in enumerate(MO_energies[0]):
             if i in data.homos:
                 MO_df = MO_df._append({"Molecular orbital": f"MO {i+1} (HOMO)", "Energy (hartree)": "{:.4f}".format(MO_energy)}, ignore_index=True)
             else:
                 MO_df = MO_df._append({"Molecular orbital": f"MO {i+1}", "Energy (hartree)": "{:.4f}".format(MO_energy)}, ignore_index=True)
+            MO_name = f"MO {i+1}"
+            visualization_dropdown_choices.append(MO_name)
+        visualization_dropdown = gr.Dropdown(label="Visualization", value="Electron density", choices=visualization_dropdown_choices)
 
     except Exception as exc:
         gr.Warning("Calculation error!\n" + str(exc))
-        return [None, None, None, None]
+        return None, None, None, None, gr.update(interactive=False), None, None
 
     calculation_status = "Calculation finished. ({0:.3f} s)".format(duration)
-    return calculation_status, energy_textbox, dipole_moment_textbox, MO_df
+    return calculation_status, energy_textbox, dipole_moment_textbox, visualization_dropdown, gr.update(interactive=True), "", MO_df
 
-reps = [
-    {
-      "model": 0,
-      "chain": "",
-      "resname": "",
-      "style": "stick",
-      "color": "whiteCarbon",
-      "residue_range": "",
-      "around": 0,
-      "byres": False,
-      "visible": False
-    }
-]
+def on_visualization_change(visualization_dropdown: gr.Dropdown):
+    if visualization_dropdown == "Electron density":
+        return gr.Slider(label="Isolevel", value=0.5, minimum=0, maximum=1, step=0.01, visible=True)
+    return gr.Slider(label="Isolevel", value=0.5, minimum=0, maximum=1, step=0.01, visible=False)
+
+def on_visualization(file_name_textbox: gr.Textbox, visualization_dropdown: gr.Dropdown, visualization_color1: gr.ColorPicker, visualization_color2: gr.ColorPicker, visualization_opacity: gr.Slider, visualization_isolevel: gr.Slider):
+    # Set options for cube file generation
+    try:
+        gaussian_mol = mol_from_gaussian_file(f'{file_name_textbox}.log')
+
+        # Convert to formatted checkpoint file
+        subprocess.run(['formchk', f'{file_name_textbox}.chk', f'{file_name_textbox}.fchk'], check=True)
+        print(f"Checkpoint file has been converted to '{file_name_textbox + '.fchk'}' .")
+
+        # Generate cube file
+        os.makedirs("./static/sp_visualization", exist_ok=True)
+        if visualization_dropdown == "Electron density":
+            subprocess.run(['cubegen', '0', 'Density=SCF', f'{file_name_textbox}' + '.fchk', f'{file_name_textbox}' + '.cube'], check=True)
+            print(f"Cube file generation job '{file_name_textbox + '.fchk'}' has been submitted.")
+
+            # Get the cube file
+            view = nglview.show_rdkit(gaussian_mol)
+            view.add_component(f"./{file_name_textbox + '.cube'}")
+
+            # Adjust visualization settings
+            view.component_1.update_surface(opacity=visualization_opacity, color=visualization_color1, isolevel=visualization_isolevel)
+            view.camera = 'orthographic'
+        elif visualization_dropdown == "Electrostatic potential":
+            subprocess.run(['cubegen', '0', 'Potential=SCF', f'{file_name_textbox}' + '.fchk', f'{file_name_textbox}' + '.cube'], check=True)
+            print(f"Cube file generation job '{file_name_textbox + '.fchk'}' has been submitted.")
+
+            # Get the cube file
+            view = nglview.show_rdkit(gaussian_mol)
+            view.add_component(f"./{file_name_textbox + '.cube'}")
+
+            # Adjust visualization settings
+            view.component_1.update_surface(opacity=visualization_opacity, color=visualization_color1, isolevel=visualization_isolevel)
+            view.camera = 'orthographic'
+        else:
+            MO_index = int(visualization_dropdown.split(" ")[1])
+            subprocess.run(['cubegen', '0', f'MO={MO_index}', f'{file_name_textbox}' + '.fchk', f'{file_name_textbox}' + '.cube'], check=True)
+            print(f"Cube file generation job '{file_name_textbox + '.fchk'}' has been submitted.")
+
+            # Get the cube file
+            view = nglview.show_rdkit(gaussian_mol)
+            view.add_component(f"./{file_name_textbox + '.cube'}")
+            view.add_component(f"./{file_name_textbox + '.cube'}")
+
+            # Adjust visualization settings
+            view.component_1.update_surface(opacity=visualization_opacity, color=visualization_color1, isolevel=2)
+            view.component_2.update_surface(opacity=visualization_opacity, color=visualization_color2, isolevel=-2)
+            view.camera = 'orthographic'
+        
+        # Write the widget to HTML
+        if os.path.exists('./static/sp_visualization/cube_file.html'):
+            os.remove('./static/sp_visualization/cube_file.html')
+        nglview.write_html('./static/sp_visualization/cube_file.html', [view])
+
+        # Read the HTML file
+        timestamp = int(time.time())
+        html = f'<iframe src="/static/sp_visualization/cube_file.html?ts={timestamp}" height="400" width="600" title="NGL View"></iframe>'
+    except Exception as exc:
+        gr.Warning("Visualization error!\n" + str(exc))
+        return None
+    
+    return html
 
 def single_point_calculation_tab_content():
     with gr.Tab("Single-Point Calculation") as single_point_calculation_tab:
         with gr.Accordion("Molecule"):
             with gr.Row(equal_height=True):
-                with gr.Column(scale=2):
-                    molecule_editor = molecule2d(label="Molecule")
                 with gr.Column(scale=1):
+                    input_smiles_texbox = gr.Textbox(label="SMILES")
                     create_molecule_button = gr.Button(value="Create molecule")
+                with gr.Column(scale=1):
+                    load_molecule_uploadbutton = gr.UploadButton(label="Load molecule", file_types=['.pdb', '.xyz', '.mol', '.mol2', '.log'])
+                with gr.Column(scale=1):
                     smiles_texbox = gr.Textbox(label="SMILES")
-                    molecule_viewer = Molecule3D(label="Molecule", reps=reps)
-                    load_molecule_uploadbutton = gr.UploadButton(label="Load molecule")
+                    molecule_viewer = gr.HTML(label="Molecule")
         with gr.Accordion("Single-Point Calculation"):
             with gr.Row(equal_height=True):
                 with gr.Column(scale=1):
@@ -213,8 +280,8 @@ def single_point_calculation_tab_content():
                                                                                             "dichloroethane", ("THF", "thf"), "aniline", "chlorobenzene", "chloroform", ("diethyl ether", "diethylether"),
                                                                                             "toluene", "benzene", ("CCl4", "ccl4"), "cyclohexane", "heptane"], allow_custom_value=True, visible=False)
                 with gr.Column(scale=1):
-                    functional_textbox = gr.Dropdown(label="Functional", value="B3LYP", choices=["LSDA", "BPV86", "B3LYP", "CAM-B3LYP", "B3PW91", "B97D", "MPW1PW91", "BPEBPE", "HSEH1BPE", "HCTH", "TPSSTPSS", "WB97XD",
-                                                                                                 "M06-2X", "mPW1PW91", "uB97XD"], allow_custom_value=True)
+                    functional_textbox = gr.Dropdown(label="Functional", value="B3LYP", choices=["LSDA", "BVP86", "B3LYP", "CAM-B3LYP", "B3PW91", "B97D", "MPW1PW91", "PBEPBE", "HSEH1PBE", "HCTH", "TPSSTPSS", "WB97XD",
+                                                                                                 "M06-2X"], allow_custom_value=True)
                     basis_set_textbox = gr.Dropdown(label="Basis set", value="3-21G", choices=["STO-3G", "3-21G", "6-31G", "6-31G'", "6-31G(d,p)", "6-31G(3d,p)", "6-31G(d,3p)", "6-31G(3d,3p)", "6-31+G(d,p)", "6-31++G(d,p)",
                                                                                                "6-311G", "6-311G(d,p)", "cc-pVDZ", "cc-pVTZ", "cc-pVQZ", "aug-cc-pVDZ", "aug-cc-pVTZ", "aug-cc-pVQZ",
                                                                                                "LanL2DZ", "LanL2MB", "SDD", "DGDZVP", "DGDZVP2", "DGTZVP", "GEN", "GENECP"], allow_custom_value=True)
@@ -232,18 +299,29 @@ def single_point_calculation_tab_content():
                 status_markdown = gr.Markdown()
             with gr.Row(equal_height=True):
                 with gr.Column(scale=1):
-                    energy_texbox = gr.Textbox(label="Energy", value="Not calculated")
-                    dipole_moment_texbox = gr.Textbox(label="Dipole moment", value="Not calculated")
+                    with gr.Row():
+                        energy_texbox = gr.Textbox(label="Energy", value="Not calculated")
+                        dipole_moment_texbox = gr.Textbox(label="Dipole moment", value="Not calculated")
+                    visualization_dropdown = gr.Dropdown(label="Visualization", value="Electron density", choices=["Electron density", "Electrostatic potential"])
+                    with gr.Row():
+                        visualization_color1 = gr.ColorPicker(label="Color 1", value="#0000ff")
+                        visualization_color2 = gr.ColorPicker(label="Color 2", value="#ff0000")
+                        visualization_opacity = gr.Slider(label="Opacity", value=0.8, minimum=0, maximum=1, step=0.01)
+                        visualization_isolevel = gr.Slider(label="Isolevel", value=0.05, minimum=0, maximum=1, step=0.01)
+                    visualize_button = gr.Button(value="Visualize", interactive=False)
+                    visualization_html = gr.HTML(label="Visualization")
                 with gr.Column(scale=1):
                     MO_dataframe = gr.DataFrame(label="Molecular orbitals")
                 
-        create_molecule_button.click(on_create_molecule, molecule_editor, [smiles_texbox, molecule_viewer, calculate_button])
+        create_molecule_button.click(on_create_molecule, input_smiles_texbox, [smiles_texbox, molecule_viewer, calculate_button])
         load_molecule_uploadbutton.upload(on_upload_molecule, load_molecule_uploadbutton, [smiles_texbox, molecule_viewer, calculate_button])
         mm_checkbox.change(on_mm_checkbox_change, mm_checkbox, [force_field_dropdown, max_iters_slider])
         solvation_checkbox.change(on_solvation_checkbox_change, solvation_checkbox, solvent_dropdown)
         calculate_button.click(on_single_point_calculate, [mm_checkbox, force_field_dropdown, max_iters_slider, solvation_checkbox, solvent_dropdown,
                                                            functional_textbox, basis_set_textbox, charge_slider, multiplicity_dropdown,
                                                            n_cores_slider, memory_slider, file_name_textbox],
-                                                          [status_markdown, energy_texbox, dipole_moment_texbox, MO_dataframe])
+                                                          [status_markdown, energy_texbox, dipole_moment_texbox, visualization_dropdown, visualize_button, visualization_html, MO_dataframe])
+        visualization_dropdown.change(on_visualization_change, visualization_dropdown, visualization_isolevel)
+        visualize_button.click(on_visualization, [file_name_textbox, visualization_dropdown, visualization_color1, visualization_color2, visualization_opacity, visualization_isolevel], [visualization_html])
         
     return single_point_calculation_tab
