@@ -433,17 +433,24 @@ def nmr_prediction_tab_content():
         with gr.Accordion("NMR Prediction"):
             with gr.Row(equal_height=True):
                 with gr.Column(scale=1):
-                    solvation_checkbox = gr.Checkbox(label="Solvation (IEFPCM)", value=True)
+                    with gr.Row():
+                        mm_checkbox = gr.Checkbox(label="Optimize geometry with molecular mechanics", value=False)
                     with gr.Row():
                         with gr.Column(scale=1):
-                            solvation_dropdown = gr.Dropdown(label="Solvation model", value="iefpcm", choices=[("IEFPCM", "iefpcm"), ("SMD", "smd"),  ("I-PCM", "ipcm"), ("SCI-PCM", "scipcm"), ("CPCM", "cpcm")], visible=False)
+                            force_field_dropdown = gr.Dropdown(label="Force field", value="MMFF", choices=["MMFF", "UFF"], visible=False)
+                        with gr.Column(scale=1):
+                            max_iters_slider = gr.Slider(label="Max iterations", value=200, minimum=0, maximum=1000, step=1, visible=False)
+                    with gr.Row():
+                        solvation_checkbox = gr.Checkbox(label="Solvation (IEFPCM)", value=True)
+                    with gr.Row():
+                        with gr.Column(scale=1):
+                            solvation_dropdown = gr.Dropdown(label="Solvation model", value="iefpcm", choices=[("IEFPCM", "iefpcm"), ("SMD", "smd"),  ("I-PCM", "ipcm"), ("SCI-PCM", "scipcm"), ("CPCM", "cpcm")])
                         with gr.Column(scale=1):
                             solvent_dropdown = gr.Dropdown(label="Solvent", value="chloroform", choices=["water", ("DMSO", "dmso"),  "nitromethane", "acetonitrile", "methanol", "ethanol", "acetone", "dichloromethane",
                                                                                                          "dichloroethane", ("THF", "thf"), "aniline", "chlorobenzene", "chloroform", ("diethyl ether", "diethylether"),
                                                                                                          "toluene", "benzene", ("CCl4", "ccl4"), "cyclohexane", "heptane"], allow_custom_value=True)
                 with gr.Column(scale=1):
-                    functional_textbox = gr.Dropdown(label="Functional", value="B3LYP", choices=["LSDA", "BVP86", "B3LYP", "CAM-B3LYP", "B3PW91", "B97D", "MPW1PW91", "PBEPBE", "HSEH1PBE", "HCTH", "TPSSTPSS", "WB97XD",
-                                                                                                 "M06-2X"], allow_custom_value=True)
+                    functional_textbox = gr.Dropdown(label="Functional", value="B3LYP", choices=["LSDA", ("B–VP86", "BVP86"), "B3LYP", "CAM-B3LYP", "B3PW91", "B97D", "MPW1PW91", "PBEPBE", "HSEH1PBE", "HCTH", "TPSSTPSS", ("ωB97XD", "WB97XD"), "M06-2X"], allow_custom_value=True)
                     basis_set_textbox = gr.Dropdown(label="Basis set", value="6-31G(d,p)", choices=["STO-3G", "3-21G", "6-31G", "6-31G'", "6-31G(d,p)", "6-31G(3d,p)", "6-31G(d,3p)", "6-31G(3d,3p)", "6-31+G(d,p)", "6-31++G(d,p)",
                                                                                                "6-311G", "6-311G(d,p)", "cc-pVDZ", "cc-pVTZ", "cc-pVQZ", "aug-cc-pVDZ", "aug-cc-pVTZ", "aug-cc-pVQZ",
                                                                                                "LanL2DZ", "LanL2MB", "SDD", "DGDZVP", "DGDZVP2", "DGTZVP", "GEN", "GENECP"], allow_custom_value=True)
@@ -474,6 +481,7 @@ def nmr_prediction_tab_content():
                 
         create_molecule_button.click(on_create_molecule, input_smiles_texbox, [smiles_texbox, molecule_viewer, predict_button])
         load_molecule_uploadbutton.upload(on_upload_molecule, load_molecule_uploadbutton, [smiles_texbox, molecule_viewer, predict_button, nmr_dataframe, nmr_spectrum_1H, nmr_spectrum_13C, export_nmr_button])
+        mm_checkbox.change(on_mm_checkbox_change, mm_checkbox, [force_field_dropdown, max_iters_slider])
         solvation_checkbox.change(on_solvation_checkbox_change, solvation_checkbox, [solvation_dropdown, solvent_dropdown])
         predict_button.click(on_nmr_predict, [solvation_checkbox, solvation_dropdown, solvent_dropdown,
                                               functional_textbox, basis_set_textbox, charge_slider, multiplicity_dropdown,

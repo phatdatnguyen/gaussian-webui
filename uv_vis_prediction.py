@@ -138,7 +138,7 @@ def write_uv_vis_gaussian_input(mol, file_name, method='B3LYP', basis='6-31G(d,p
         # First job: ground-state optimization
         route1 = f'#P {method}/{basis} Opt'
         if solvation:
-            route_section += f' scrf=({solvation},solvent={solvent})'
+            route1 += f' scrf=({solvation},solvent={solvent})'
         route1 += '\n\n'
         f.write(route1)
         f.write('S0 geometry optimization\n\n')
@@ -157,8 +157,8 @@ def write_uv_vis_gaussian_input(mol, file_name, method='B3LYP', basis='6-31G(d,p
         f.write(f'%Mem={memory}GB\n')
         f.write(f'%Chk={file_name}.chk\n')
         route2 = f'#P {method}/{basis} TD(NStates={n_states}) Geom=AllCheck Guess=Read'
-        if solvent:
-            route2 += f' SCRF=(IEFPCM,Solvent={solvent})'
+        if solvation:
+            route2 += f' scrf=({solvation},solvent={solvent})'
         route2 += '\n\n'
         f.write(route2)
         f.write('TD-DFT vertical excitations at optimized S0 geometry\n\n')
@@ -321,24 +321,26 @@ def uv_vis_prediction_tab_content():
         with gr.Accordion("UV-Vis Spectrum Prediction"):
             with gr.Row(equal_height=True):
                 with gr.Column(scale=1):
-                    mm_checkbox = gr.Checkbox(label="Optimize geometry with molecular mechanics", value=True)
+                    with gr.Row():
+                        mm_checkbox = gr.Checkbox(label="Optimize geometry with molecular mechanics", value=False)
                     with gr.Row():
                         with gr.Column(scale=1):
-                            force_field_dropdown = gr.Dropdown(label="Force field", value="MMFF", choices=["MMFF", "UFF"])
+                            force_field_dropdown = gr.Dropdown(label="Force field", value="MMFF", choices=["MMFF", "UFF"], visible=False)
                         with gr.Column(scale=1):
-                            max_iters_slider = gr.Slider(label="Max iterations", value=200, minimum=0, maximum=1000, step=1)
-                    n_states_slider = gr.Slider(label="Number of excited states", value=10, minimum=5, maximum=100, step=1)
-                    solvation_checkbox = gr.Checkbox(label="Solvation", value=False)
+                            max_iters_slider = gr.Slider(label="Max iterations", value=200, minimum=0, maximum=1000, step=1, visible=False)
+                    with gr.Row():
+                        n_states_slider = gr.Slider(label="Number of excited states", value=10, minimum=5, maximum=100, step=1)
+                    with gr.Row():
+                        solvation_checkbox = gr.Checkbox(label="Solvation", value=True)
                     with gr.Row():
                         with gr.Column(scale=1):
-                            solvation_dropdown = gr.Dropdown(label="Solvation model", value="iefpcm", choices=[("IEFPCM", "iefpcm"), ("SMD", "smd"),  ("I-PCM", "ipcm"), ("SCI-PCM", "scipcm"), ("CPCM", "cpcm")], visible=False)
+                            solvation_dropdown = gr.Dropdown(label="Solvation model", value="smd", choices=[("IEFPCM", "iefpcm"), ("SMD", "smd"),  ("I-PCM", "ipcm"), ("SCI-PCM", "scipcm"), ("CPCM", "cpcm")])
                         with gr.Column(scale=1):
                             solvent_dropdown = gr.Dropdown(label="Solvent", value="water", choices=["water", ("DMSO", "dmso"),  "nitromethane", "acetonitrile", "methanol", "ethanol", "acetone", "dichloromethane",
                                                                                                     "dichloroethane", ("THF", "thf"), "aniline", "chlorobenzene", "chloroform", ("diethyl ether", "diethylether"),
-                                                                                                    "toluene", "benzene", ("CCl4", "ccl4"), "cyclohexane", "heptane"], allow_custom_value=True, visible=False)
+                                                                                                    "toluene", "benzene", ("CCl4", "ccl4"), "cyclohexane", "heptane"], allow_custom_value=True)
                 with gr.Column(scale=1):
-                    functional_textbox = gr.Dropdown(label="Functional", value="B3LYP", choices=["LSDA", "BVP86", "B3LYP", "CAM-B3LYP", "B3PW91", "B97D", "MPW1PW91", "PBEPBE", "HSEH1PBE", "HCTH", "TPSSTPSS", "WB97XD",
-                                                                                                 "M06-2X"], allow_custom_value=True)
+                    functional_textbox = gr.Dropdown(label="Functional", value="B3LYP", choices=["LSDA", ("B–VP86", "BVP86"), "B3LYP", "CAM-B3LYP", "B3PW91", "B97D", "MPW1PW91", "PBEPBE", "HSEH1PBE", "HCTH", "TPSSTPSS", ("ωB97XD", "WB97XD"), "M06-2X"], allow_custom_value=True)
                     basis_set_textbox = gr.Dropdown(label="Basis set", value="6-31G(d,p)", choices=["STO-3G", "3-21G", "6-31G", "6-31G'", "6-31G(d,p)", "6-31G(3d,p)", "6-31G(d,3p)", "6-31G(3d,3p)", "6-31+G(d,p)", "6-31++G(d,p)",
                                                                                                "6-311G", "6-311G(d,p)", "cc-pVDZ", "cc-pVTZ", "cc-pVQZ", "aug-cc-pVDZ", "aug-cc-pVTZ", "aug-cc-pVQZ",
                                                                                                "LanL2DZ", "LanL2MB", "SDD", "DGDZVP", "DGDZVP2", "DGTZVP", "GEN", "GENECP"], allow_custom_value=True)
@@ -363,6 +365,7 @@ def uv_vis_prediction_tab_content():
                 
         create_molecule_button.click(on_create_molecule, input_smiles_texbox, [smiles_texbox, molecule_viewer, predict_button])
         load_molecule_uploadbutton.upload(on_upload_molecule, load_molecule_uploadbutton, [smiles_texbox, molecule_viewer, predict_button, uv_vis_spectrum_plot, peak_table])
+        mm_checkbox.change(on_mm_checkbox_change, mm_checkbox, [force_field_dropdown, max_iters_slider])
         solvation_checkbox.change(on_solvation_checkbox_change, solvation_checkbox, [solvation_dropdown, solvent_dropdown])
         predict_button.click(on_uv_vis_predict, [mm_checkbox, force_field_dropdown, max_iters_slider, n_states_slider, solvation_checkbox, solvation_dropdown, solvent_dropdown,
                                                  functional_textbox, basis_set_textbox, charge_slider, multiplicity_dropdown,

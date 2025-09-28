@@ -52,7 +52,7 @@ def molecular_structure_tab_content():
                     input_smiles_texbox = gr.Textbox(label="SMILES")
                     charge_slider = gr.Slider(label="Charge", value=0, minimum=-2, maximum=2, step=1)
                     multiplicity_dropdown = gr.Dropdown(label="Multiplicity", value=1, choices=[("Singlet", 1), ("Doublet", 2), ("Triplet", 3), ("Quartet", 4), ("Quintet", 5), ("Sextet", 6)])
-                    num_confs_slider = gr.Slider(label="Number of conformers", value=30, minimum=1, maximum=50, step=1)
+                    num_confs_slider = gr.Slider(label="Number of conformers", value=1, minimum=1, maximum=100, step=1)
                     file_name_textbox = gr.Textbox(label="File name", value="conformer")
                     file_type_dropdown = gr.Dropdown(label="File type", value="xyz", choices=["xyz", "pdb", "mol"])
                     generate_button = gr.Button(value="Generate")
