@@ -47,8 +47,6 @@ def on_create_molecule(input_smiles_textbox: gr.Textbox):
     return smiles, html, gr.update(interactive=True)
 
 def on_upload_molecule(load_molecule_uploadbutton: gr.UploadButton):
-    os.makedirs("structures", exist_ok=True)
-    file_path = "./structures/molecule_nmr.pdb"
     uploaded_file_path = load_molecule_uploadbutton
     _, file_extension = os.path.splitext(uploaded_file_path)
 
@@ -67,11 +65,14 @@ def on_upload_molecule(load_molecule_uploadbutton: gr.UploadButton):
             mol_nmr = mol_from_gaussian_file(uploaded_file_path)
         else:
             raise Exception("File must be in supported formats (pdb, xyz, mol, mol2, log).")
+        Chem.SanitizeMol(mol_nmr)
         
-        smiles = Chem.CanonSmiles(Chem.MolToSmiles(mol_nmr))    
+        if file_extension.lower() == ".xyz" or file_extension.lower() == ".log":
+            smiles = "(No bonding information)"
+        else:
+            smiles = Chem.CanonSmiles(Chem.MolToSmiles(mol_nmr))
         if mol_nmr.GetNumConformers()==0:
             AllChem.EmbedMolecule(mol_nmr)
-        Chem.MolToPDBFile(mol_nmr, file_path) 
 
         # Create the NGL view widget
         view = nglview.show_rdkit(mol_nmr)
@@ -86,34 +87,80 @@ def on_upload_molecule(load_molecule_uploadbutton: gr.UploadButton):
         html = f'<iframe src="/static/molecule_nmr.html?ts={timestamp}" height="300" width="400" title="NGL View"></iframe>'
     except Exception as exc:
         gr.Warning("Error!\n" + str(exc))
-
-        return None, None, None
+        return None, None, gr.update(interactive=False), None, None, None, gr.update(interactive=False)
     
-    return smiles, html, gr.update(interactive=True)
+    # Read calculation results if the uploaded file is a Gaussian log file
+    if file_extension.lower() == ".log":
+        try:
+            # Get results
+            shielding_data = parse_nmr_shielding_constants(uploaded_file_path)
+            reference_shieldings = {
+                'H': 31.5,
+                'C': 186.0
+            }       
+
+            shifts_data = calculate_chemical_shifts(shielding_data, reference_shieldings)
+
+            # Create the DataFrame
+            atom_indices = []
+            element_symbols = []
+            shielding_constants = []
+            chemical_shifts = []
+
+            shielding_dict = {(atom_idx, element): shielding for atom_idx, element, shielding in shielding_data}
+
+            for atom_idx, element, shift in shifts_data:
+                key = (atom_idx, element)
+                shielding = shielding_dict.get(key, None)
+                if shielding is not None:
+                    atom_indices.append(atom_idx)
+                    element_symbols.append(element)
+                    shielding_constants.append('{:.4f}'.format(shielding))
+                    chemical_shifts.append('{:.4f}'.format(shift))
+                else:
+                    atom_indices.append(atom_idx)
+                    element_symbols.append(element)
+                    shielding_constants.append("")
+                    chemical_shifts.append("")
+
+            nmr_df = pd.DataFrame({
+                'Index': atom_indices,
+                'Symbol': element_symbols,
+                'Shielding (ppm)': shielding_constants,
+                'Chemical Shift (ppm, ref: TMS)': chemical_shifts
+            })
+
+            # Generate 1H NMR spectrum
+            nmr_spectrum_1H = generate_nmr_spectrum_interactive(
+                shifts_data,
+                element_symbol='H',
+                linewidth=1,           # Line width in Hz
+                frequency=500,         # 500 MHz spectrometer
+                plot_range=(-2, 13)    # Plot from 0 to 10 ppm
+            )
+
+            # Generate 13C NMR spectrum
+            nmr_spectrum_13C = generate_nmr_spectrum_interactive(
+                shifts_data,
+                element_symbol='C',
+                linewidth=1,           # Line width in Hz
+                frequency=500,         # 500 MHz spectrometer
+                plot_range=(-25, 225)  # Plot from 0 to 200 ppm
+            )
+
+            return smiles, html, gr.update(interactive=True), nmr_df, nmr_spectrum_1H, nmr_spectrum_13C, gr.update(interactive=True)
+        except:
+            return smiles, html, gr.update(interactive=True), None, None, None, gr.update(interactive=False)
+    else:
+        return smiles, html, gr.update(interactive=True), None, None, None, gr.update(interactive=False)
 
 def on_mm_checkbox_change(mm_checkbox: gr.Checkbox):
-    if mm_checkbox:
-        force_field_dropdown = gr.Dropdown(label="Force field", value="MMFF", choices=["MMFF", "UFF"], visible=True)
-        max_iters_slider = gr.Slider(label="Max iterations", value=200, minimum=0, maximum=1000, step=1, visible=True)
-    else:
-        force_field_dropdown = gr.Dropdown(label="Force field", value="MMFF", choices=["MMFF", "UFF"], visible=False)
-        max_iters_slider = gr.Slider(label="Max iterations", value=200, minimum=0, maximum=1000, step=1, visible=False)
-
-    return force_field_dropdown, max_iters_slider
+    return gr.update(visible=mm_checkbox), gr.update(visible=mm_checkbox)
 
 def on_solvation_checkbox_change(solvation_checkbox: gr.Checkbox):
-    if solvation_checkbox:
-        solvent_dropdown = gr.Dropdown(label="Solvent", value="chloroform", choices=["water", ("DMSO", "dmso"),  "nitromethane", "acetonitrile", "methanol", "ethanol", "acetone", "dichloromethane",
-                                                                                "dichloroethane", ("THF", "thf"), "aniline", "chlorobenzene", "chloroform", ("diethyl ether", "diethylether"),
-                                                                                "toluene", "benzene", ("CCl4", "ccl4"), "cyclohexane", "heptane"], allow_custom_value=True, visible=True)
-    else:
-        solvent_dropdown = gr.Dropdown(label="Solvent", value="chloroform", choices=["water", ("DMSO", "dmso"),  "nitromethane", "acetonitrile", "methanol", "ethanol", "acetone", "dichloromethane",
-                                                                                "dichloroethane", ("THF", "thf"), "aniline", "chlorobenzene", "chloroform", ("diethyl ether", "diethylether"),
-                                                                                "toluene", "benzene", ("CCl4", "ccl4"), "cyclohexane", "heptane"], allow_custom_value=True, visible=False)
+    return gr.update(visible=solvation_checkbox), gr.update(visible=solvation_checkbox)
 
-    return solvent_dropdown
-
-def write_nmr_gaussian_input(mol, file_name, method='B3LYP', basis='6-31G(d,p)', charge=0, multiplicity=1, solvent=None, n_proc=4, memory=2):
+def write_nmr_gaussian_input(mol, file_name, method='B3LYP', basis='6-31G(d,p)', charge=0, multiplicity=1, solvation=None, solvent=None, n_proc=4, memory=2):
     # Open the file for writing
     with open(file_name + '.gjf', 'w') as f:
         # Link0 commands
@@ -122,8 +169,8 @@ def write_nmr_gaussian_input(mol, file_name, method='B3LYP', basis='6-31G(d,p)',
         f.write(f'%Chk={file_name}.chk\n')
         # Route section
         route_section = f'#P {method}/{basis} NMR=GIAO'
-        if solvent:
-            route_section += f' scrf=(iefpcm,solvent={solvent})'
+        if solvation:
+            route_section += f' scrf=({solvation},solvent={solvent})'
         route_section += '\n\n'
         f.write(route_section)
         # Title section
@@ -283,17 +330,16 @@ def generate_nmr_spectrum_interactive(shifts_data, element_symbol, linewidth=0.5
 
     return fig
 
-def on_nmr_predict(solvation_checkbox: gr.Checkbox, solvent_dropdown: gr.Dropdown,
+def on_nmr_predict(solvation_checkbox: gr.Checkbox, solvation_dropdown: gr.Dropdown, solvent_dropdown: gr.Dropdown,
                    functional_textbox: gr.Dropdown, basis_set_textbox: gr.Dropdown, charge_slider: gr.Slider, multiplicity_dropdown: gr.Dropdown,
                    n_cores_slider: gr.Slider, memory_slider: gr.Slider, file_name_textbox: gr.Textbox):
     try:
         # Write Gaussian input file
         if solvation_checkbox:
-            solvent = solvent_dropdown
+            solvation = solvation_dropdown
         else:
-            solvent = None
-        write_nmr_gaussian_input(mol_nmr, file_name=file_name_textbox, method=functional_textbox, basis=basis_set_textbox, charge=charge_slider, multiplicity=multiplicity_dropdown, solvent=solvent,
-                                n_proc=n_cores_slider, memory=memory_slider)
+            solvation = None
+        write_nmr_gaussian_input(mol_nmr, file_name=file_name_textbox, method=functional_textbox, basis=basis_set_textbox, charge=charge_slider, multiplicity=multiplicity_dropdown, solvation=solvation, solvent=solvent_dropdown, n_proc=n_cores_slider, memory=memory_slider)
 
         # Run calculation
         start = time.time()
@@ -360,12 +406,11 @@ def on_nmr_predict(solvation_checkbox: gr.Checkbox, solvent_dropdown: gr.Dropdow
 
     except Exception as exc:
         gr.Warning("Calculation error!\n" + str(exc))
-        export_nmr_button = gr.Button(value="Export", interactive=False)
-        return None, None, None, None, export_nmr_button
+        return None, gr.update(visible=False), None, None, None, gr.update(interactive=False)
 
     calculation_status = "Calculation finished. ({0:.3f} s)".format(duration)
-    export_nmr_button = gr.Button(value="Export", interactive=True)
-    return calculation_status, nmr_df, nmr_spectrum_1H, nmr_spectrum_13C, export_nmr_button
+    output_file_path = f'{file_name_textbox}.log'
+    return calculation_status, gr.update(value=output_file_path, visible=True), nmr_df, nmr_spectrum_1H, nmr_spectrum_13C, gr.update(interactive=True)
 
 def on_export_nmr(nmr_dataframe: gr.Dataframe, nmr_filename_textbox: gr.Textbox):
     file_path = nmr_filename_textbox + '.csv'
@@ -389,9 +434,13 @@ def nmr_prediction_tab_content():
             with gr.Row(equal_height=True):
                 with gr.Column(scale=1):
                     solvation_checkbox = gr.Checkbox(label="Solvation (IEFPCM)", value=True)
-                    solvent_dropdown = gr.Dropdown(label="Solvent", value="chloroform", choices=["water", ("DMSO", "dmso"),  "nitromethane", "acetonitrile", "methanol", "ethanol", "acetone", "dichloromethane",
-                                                                                            "dichloroethane", ("THF", "thf"), "aniline", "chlorobenzene", "chloroform", ("diethyl ether", "diethylether"),
-                                                                                            "toluene", "benzene", ("CCl4", "ccl4"), "cyclohexane", "heptane"], allow_custom_value=True)
+                    with gr.Row():
+                        with gr.Column(scale=1):
+                            solvation_dropdown = gr.Dropdown(label="Solvation model", value="iefpcm", choices=[("IEFPCM", "iefpcm"), ("SMD", "smd"),  ("I-PCM", "ipcm"), ("SCI-PCM", "scipcm"), ("CPCM", "cpcm")], visible=False)
+                        with gr.Column(scale=1):
+                            solvent_dropdown = gr.Dropdown(label="Solvent", value="chloroform", choices=["water", ("DMSO", "dmso"),  "nitromethane", "acetonitrile", "methanol", "ethanol", "acetone", "dichloromethane",
+                                                                                                         "dichloroethane", ("THF", "thf"), "aniline", "chlorobenzene", "chloroform", ("diethyl ether", "diethylether"),
+                                                                                                         "toluene", "benzene", ("CCl4", "ccl4"), "cyclohexane", "heptane"], allow_custom_value=True)
                 with gr.Column(scale=1):
                     functional_textbox = gr.Dropdown(label="Functional", value="B3LYP", choices=["LSDA", "BVP86", "B3LYP", "CAM-B3LYP", "B3PW91", "B97D", "MPW1PW91", "PBEPBE", "HSEH1PBE", "HCTH", "TPSSTPSS", "WB97XD",
                                                                                                  "M06-2X"], allow_custom_value=True)
@@ -410,6 +459,7 @@ def nmr_prediction_tab_content():
         with gr.Accordion("Prediction Results"):
             with gr.Row():
                 status_markdown = gr.Markdown()
+                download_button = gr.DownloadButton(label="Download calculation output file", visible=False)
             with gr.Row():
                 with gr.Column(scale=1):
                     nmr_dataframe = gr.DataFrame(label="NMR signals")
@@ -423,12 +473,12 @@ def nmr_prediction_tab_content():
                         nmr_spectrum_13C = gr.Plot(label="13C NMR spectrum")
                 
         create_molecule_button.click(on_create_molecule, input_smiles_texbox, [smiles_texbox, molecule_viewer, predict_button])
-        load_molecule_uploadbutton.upload(on_upload_molecule, load_molecule_uploadbutton, [smiles_texbox, molecule_viewer, predict_button])
-        solvation_checkbox.change(on_solvation_checkbox_change, solvation_checkbox, solvent_dropdown)
-        predict_button.click(on_nmr_predict, [solvation_checkbox, solvent_dropdown,
-                                                functional_textbox, basis_set_textbox, charge_slider, multiplicity_dropdown,
-                                                n_cores_slider, memory_slider, file_name_textbox],
-                                               [status_markdown, nmr_dataframe, nmr_spectrum_1H, nmr_spectrum_13C, export_nmr_button])
+        load_molecule_uploadbutton.upload(on_upload_molecule, load_molecule_uploadbutton, [smiles_texbox, molecule_viewer, predict_button, nmr_dataframe, nmr_spectrum_1H, nmr_spectrum_13C, export_nmr_button])
+        solvation_checkbox.change(on_solvation_checkbox_change, solvation_checkbox, [solvation_dropdown, solvent_dropdown])
+        predict_button.click(on_nmr_predict, [solvation_checkbox, solvation_dropdown, solvent_dropdown,
+                                              functional_textbox, basis_set_textbox, charge_slider, multiplicity_dropdown,
+                                              n_cores_slider, memory_slider, file_name_textbox],
+                                             [status_markdown, download_button, nmr_dataframe, nmr_spectrum_1H, nmr_spectrum_13C, export_nmr_button])
         export_nmr_button.click(on_export_nmr, [nmr_dataframe, nmr_filename_textbox], export_nmr_status_markdown)
         
     return nmr_prediction_tab

@@ -34,8 +34,8 @@ pip install psutil
 pip install rdkit
 pip install cclib
 pip install plotly
-pip install gradio
 pip install gradio_molecule2d
+pip install gradio --upgrade
 pip install nglview
 ```
 
