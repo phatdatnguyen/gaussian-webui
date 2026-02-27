@@ -14,6 +14,9 @@ __pycache__/
 *.csv
 *.xyz
 *.pdb
+*.mol
+*.mol2
 *.html
 *.cube
 *.7
+nmr_analysis.py

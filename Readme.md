@@ -35,8 +35,9 @@ pip install rdkit
 pip install cclib
 pip install plotly
 pip install gradio_molecule2d
-pip install gradio --upgrade
-pip install nglview
+pip uninstall gradio
+pip install gradio==5.50.0
+pip install nglview==4.0
 ```
 
 ## Start web UI

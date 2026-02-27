@@ -1,13 +1,10 @@
 import os
 import glob
 import gradio as gr
-from molecular_structure import molecular_structure_tab_content
-from single_point_calculation import single_point_calculation_tab_content
-from geometry_optimization import geometry_optimization_tab_content
-from frequency_analysis import frequency_analysis_tab_content
-from uv_vis_prediction import uv_vis_prediction_tab_content
-from fluorescence_prediction import fluorescence_prediction_tab_content
-from nmr_prediction import nmr_prediction_tab_content
+from working_directory import wordking_directory_blocks
+from conformer_generation import conformer_generation_tab_content
+from calculation import calculation_tab_content
+from result import result_tab_content
 from pathlib import Path
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
@@ -29,6 +26,10 @@ for filepath in glob.iglob('./static/**/*.html', recursive=True):
 # create a FastAPI app
 app = FastAPI()
 
+# create a data directory
+data_dir = Path('./data')
+data_dir.mkdir(parents=True, exist_ok=True)
+
 # create a static directory to store the static files
 static_dir = Path('./static')
 static_dir.mkdir(parents=True, exist_ok=True)
@@ -49,19 +50,21 @@ def find_available_port(start_port=7860):
 
 available_port = find_available_port()
 
-with gr.Blocks(css='styles.css') as blocks:
-    with gr.Tabs() as tabs:
-        molecular_structure_tab_content()
-        single_point_calculation_tab_content()
-        geometry_optimization_tab_content()
-        frequency_analysis_tab_content()
-        uv_vis_prediction_tab_content()
-        fluorescence_prediction_tab_content()
-        nmr_prediction_tab_content()
+with gr.Blocks(css_paths=Path('./styles.css')) as blocks:
+    with gr.Row():
+        working_directory_path_state, working_directory_file_list_state = wordking_directory_blocks()
+        with gr.Column(scale=2):
+            with gr.Row(min_height=40):
+                status_markdown = gr.Markdown()
+            with gr.Row():
+                with gr.Tabs() as tabs:
+                    conformer_generation_tab_content(working_directory_path_state, working_directory_file_list_state, status_markdown)
+                    calculation_tab_content(working_directory_path_state, working_directory_file_list_state, status_markdown)
+                    result_tab_content(working_directory_path_state, working_directory_file_list_state, status_markdown)
 
 # mount Gradio app to FastAPI app
 app = gr.mount_gradio_app(app, blocks, path="/")
 
 # serve the app
 if __name__ == "__main__":
-    uvicorn.run(app, host="127.0.0.1", port=available_port)
+    uvicorn.run(app, host="127.0.0.1", port=available_port, access_log=False)
