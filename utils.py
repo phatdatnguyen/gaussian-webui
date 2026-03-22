@@ -294,21 +294,20 @@ def write_uv_vis_gaussian_input(mol, file_name, method_type, method_name, functi
         f.write(f'{charge} {multiplicity}\n\n')
 
 def write_fluorescence_gaussian_input(mol, file_name, method_type, method_name, functional='B3LYP', basis='6-31G(d,p)', n_states=10, charge=0, multiplicity=1, solvation=False, solvation_model=None, solvent=None, n_proc=4, memory=2):
-    # Open the file for writing
-    with open(file_name + '.gjf', 'w') as f:
-        # Get method for both jobs
-        if method_type == "HF":
-            method = f'hf/{basis.lower()}'
-        elif method_type == "DFT":
-            method = f'{functional.lower()}/{basis.lower()}'
-        elif method_type in ["MP2", "CCSD", "BD"]:
-            method = f'{method_type.lower()}/{basis.lower()}'
-        elif method_type == "MP4":
-            method = f'mp4(sdtq)/{basis.lower()}'
-        else: # method_type in ["Semi-empirical", "Compound"]:
-            method = f'{method_name.lower()}'
-
-        # First job: excited-state optimization (S1)
+    # Get method for both jobs
+    if method_type == "HF":
+        method = f'hf/{basis.lower()}'
+    elif method_type == "DFT":
+        method = f'{functional.lower()}/{basis.lower()}'
+    elif method_type in ["MP2", "CCSD", "BD"]:
+        method = f'{method_type.lower()}/{basis.lower()}'
+    elif method_type == "MP4":
+        method = f'mp4(sdtq)/{basis.lower()}'
+    else: # method_type in ["Semi-empirical", "Compound"]:
+        method = f'{method_name.lower()}'
+    
+    # First job: excited-state optimization (S1)
+    with open(file_name + '_S1_Opt.gjf', 'w') as f:
         f.write(f'%NProcShared={n_proc}\n')
         f.write(f'%Mem={memory}GB\n')
         f.write(f'%Chk={file_name}.chk\n')
@@ -327,18 +326,17 @@ def write_fluorescence_gaussian_input(mol, file_name, method_type, method_name, 
             f.write(f'{sym:<2} {pos.x:>12.6f} {pos.y:>12.6f} {pos.z:>12.6f}\n')
         f.write('\n')
 
-        # Second job: TD single point at optimized S1 geometry
-        f.write('--Link1--\n')
+    # Second job: TD single point at optimized S1 geometry
+    with open(file_name + '_S1_SP.gjf', 'w') as f:
         f.write(f'%NProcShared={n_proc}\n')
         f.write(f'%Mem={memory}GB\n')
         f.write(f'%Chk={file_name}.chk\n')
-        route2 = f'#P {method} TD(Singlets,NStates={n_states}) Geom=AllCheck Guess=Read'
+        route2 = f'#P {method} TD(Singlets,NStates={n_states},Root=1) Geom=AllCheck Guess=Read'
         if solvation:
             route2 += f' scrf=({solvation_model},solvent={solvent})'
         route2 += '\n\n'
         f.write(route2)
         f.write('TD single-point at optimized S1 geometry (emission energies)\n\n')
-        f.write(f'{charge} {multiplicity}\n\n')
 
 def write_nmr_gaussian_input(mol, file_name, method_type, functional='B3LYP', basis='6-31G(d,p)', spin_spin_coupling=False, charge=0, multiplicity=1, solvation=False, solvation_model=None, solvent=None, n_proc=4, memory=2):
     # Open the file for writing

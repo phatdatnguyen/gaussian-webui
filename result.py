@@ -250,9 +250,20 @@ def on_show_absorption_spectrum(data):
         absorption_spectrum = generate_absorption_emission_spectrum_interactive(wavelengths=wavelengths, oscs=oscs, points=10000, plot_range=(0, 800))
 
         # Build peak dataframe
+        configurations_list = data.etsecs
+        configurations_str_list = []
+        for configurations in configurations_list:
+            transitions_str_list = []
+            for transition_begin, transition_end, coefficient in configurations:
+                transitions_str_list.append(f"{transition_begin[0]} -> {transition_end[0]} (coefficient: {coefficient:.4f})")
+            transitions_str = "\n".join(transitions_str_list)
+            configurations_str_list.append(transitions_str)
+        symmetry_list = [symmetry for symmetry in data.etsyms]
         peak_df = pd.DataFrame({
             "Absorption Wavelength (nm)": np.round(wavelengths, 4),
-            "Oscillator Strength": oscs
+            "Oscillator Strength": oscs,
+            "Transitions": configurations_str_list,
+            "Symmetry": symmetry_list
         })
 
         # Sort by wavelength (ascending order)
@@ -278,9 +289,17 @@ def on_show_emission_spectrum(data):
         emission_spectrum = generate_absorption_emission_spectrum_interactive(wavelengths=wavelengths, oscs=oscs, points=10000, plot_range=(0, 800))
 
         # Build peak dataframe
+        configurations = data.etsecs[0]
+        transitions_str_list = []
+        for transition_begin, transition_end, coefficient in configurations:
+            transitions_str_list.append(f"{transition_begin[0]} -> {transition_end[0]} (coefficient: {coefficient:.4f})")
+        transitions_str = "\n".join(transitions_str_list)
+        symmetry = data.etsyms[0]
         peak_df = pd.DataFrame({
             "Emission Wavelength (nm)": np.round(wavelengths, 4),
-            "Oscillator Strength": oscs
+            "Oscillator Strength": oscs,
+            "Transitions": transitions_str,
+            "Symmetry": symmetry
         })
 
         # Sort by wavelength (ascending order)
@@ -293,7 +312,7 @@ def on_show_emission_spectrum(data):
 def on_export_data(working_directory_path, file_name, df):
     try:
         file_path = os.path.join(working_directory_path, file_name + ".csv")
-        df.to_csv(file_path, index=False)
+        df.to_csv(file_path, encoding='utf-8', index=False)
         status = "Data exported succesfully."
         return f"<span style='color:green;'>{status}</span>", get_files_in_working_directory(working_directory_path)
     except Exception as exc:
@@ -341,11 +360,12 @@ def result_tab_content(working_directory_path_state, working_directory_file_list
                 with gr.Column(scale=1):
                     absorption_spectrum_button = gr.Button("Show absorption spectrum")
                     emission_spectrum_button = gr.Button("Show emission spectrum")
-                    peak_dataframe = gr.Dataframe(headers=["Wavelength (nm)", "Oscillator Strength"], datatype=["number", "number"], label="Absorption Peaks")
+                with gr.Column(scale=2):
+                    peak_dataframe = gr.Dataframe(label="Absorption Peaks", headers=["Wavelength (nm)", "Oscillator Strength"], datatype=["number", "number", "markdown", "markdown"], line_breaks=True, wrap=True)
                     peak_filename_textbox = gr.Textbox(label="File name", value="peak_data")
                     export_peak_button = gr.Button(value="Export", interactive=False)
-                with gr.Column(scale=2):
-                    absorption_emisson_spectrum_plot = gr.Plot(label="UV-Vis Spectrum")
+            with gr.Row():
+                absorption_emisson_spectrum_plot = gr.Plot(label="UV-Vis Spectrum")
         with gr.Accordion(label="Frequency", visible=False) as nmr_result_accordion:
             with gr.Row():
                 with gr.Column(scale=1):
