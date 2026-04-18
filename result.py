@@ -12,7 +12,7 @@ from utils import get_files_in_working_directory, mol_from_gaussian_file, genera
 
 def on_working_directory_file_list_change(working_directory_file_list):
     output_file_names = [f for f in working_directory_file_list if f.endswith('.log') ]
-    return gr.update(choices=output_file_names, value=output_file_names[0], interactive=True)
+    return gr.update(choices=output_file_names, value=output_file_names[0] if len(output_file_names) > 0 else None, interactive=True)
 
 def on_load_result_file(working_directory_path, calculation_result_file_name):
     try:

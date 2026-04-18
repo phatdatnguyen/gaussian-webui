@@ -96,7 +96,8 @@ def on_generate_input_file(working_directory_path, input_structure_file_dropdown
             mol = add_bonds(mol_from_gaussian_file(file_path))
 
         Chem.SanitizeMol(mol)
-        AllChem.EmbedMolecule(mol)
+        if mol.GetNumConformers()==0:
+            AllChem.EmbedMolecule(mol)
 
         # Optimize geometry with molecular mechanics
         if use_mm:

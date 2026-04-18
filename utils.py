@@ -61,7 +61,6 @@ def mol_from_xyz_file(file_path, return_charge_and_multiplicity=False):
     mol = Chem.RWMol()
 
     # Parse the atomic coordinates and add atoms
-    coords = []
     elements = []
     for line in lines[1:]:
         if line.strip():
@@ -70,8 +69,6 @@ def mol_from_xyz_file(file_path, return_charge_and_multiplicity=False):
             atom = Chem.Atom(element)
             mol.AddAtom(atom)
             elements.append(element)
-            x, y, z = map(float, parts[1:4])
-            coords.append([x, y, z])
 
     # Add 3D coordinates to the molecule
     conf = Chem.Conformer(mol.GetNumAtoms())
