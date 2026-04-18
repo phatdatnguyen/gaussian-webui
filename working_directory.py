@@ -15,7 +15,7 @@ def get_working_directories():
 def on_open_working_directory(working_directory):
     if working_directory is None or working_directory.strip() == "":
         gr.Warning("Please specify a working directory.")
-        return None, None, None, None
+        return gr.update(), None, None, gr.update()
     
     working_directory_path = os.path.join("./data/", working_directory)
     os.makedirs(working_directory_path, exist_ok=True)
@@ -129,7 +129,7 @@ def on_view_text_file(working_directory_path, text_file_name):
         return gr.update(label=f"Text File Viewer - {text_file_name}", value=content, interactive=True), gr.update(interactive=True)
     except Exception as exc:
         gr.Warning("Error!\n" + str(exc))
-        return None, None
+        return gr.update(), gr.update()
 
 def on_save_text_file(working_directory_path, text_file_name, text_content):
     if text_file_name is None:
