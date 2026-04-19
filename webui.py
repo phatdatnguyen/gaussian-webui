@@ -1,7 +1,7 @@
 import os
 import glob
 import gradio as gr
-from working_directory import wordking_directory_blocks
+from working_directory import working_directory_blocks
 from conformer_generation import conformer_generation_tab_content
 from calculation import calculation_tab_content
 from result import result_tab_content
@@ -52,7 +52,7 @@ available_port = find_available_port()
 
 with gr.Blocks(css_paths=Path('./styles.css')) as blocks:
     with gr.Row():
-        working_directory_path_state, working_directory_file_list_state = wordking_directory_blocks()
+        working_directory_path_state, working_directory_file_list_state = working_directory_blocks()
         with gr.Column(scale=2):
             with gr.Row(min_height=40):
                 status_markdown = gr.Markdown()

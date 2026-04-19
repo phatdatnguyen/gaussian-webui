@@ -147,7 +147,7 @@ def on_save_text_file(working_directory_path, text_file_name, text_content):
     
     return get_files_in_working_directory(working_directory_path)
 
-def wordking_directory_blocks():
+def working_directory_blocks():
     with gr.Column(scale=1):
         working_directory_dropdown = gr.Dropdown(label="Working Directory", choices=get_working_directories(), value="wd", allow_custom_value=True)
         working_directory_path_state = gr.State()
