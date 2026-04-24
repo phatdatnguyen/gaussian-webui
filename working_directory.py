@@ -43,9 +43,11 @@ def on_file_list_change(working_directory_path):
             file_type = "Other File"
         
         file_path = os.path.join(working_directory_path, f)
-        modified_time = time.ctime(os.path.getmtime(file_path))
+        modified_time = os.path.getmtime(file_path)
         file_info.append([f, file_type, modified_time])
-        file_info.sort(key=lambda x: x[2].lower(), reverse=True) # Sort by modified time descending
+    file_info.sort(key=lambda x: x[2], reverse=True)
+    for entry in file_info:
+        entry[2] = time.ctime(entry[2])
     file_df = pd.DataFrame(file_info, columns=["File", "Type", "Modified"])
 
     return file_df

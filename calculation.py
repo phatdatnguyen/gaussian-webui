@@ -20,7 +20,7 @@ def on_working_directory_file_list_change(working_directory_file_list, input_fil
     if input_file_name + ".gjf" in input_file_names:
         input_file_name_value = input_file_name + ".gjf"
     else:
-        input_file_name_value = input_file_names[0] if len(input_file_names) > 1 else None
+        input_file_name_value = input_file_names[0] if len(input_file_names) > 0 else None
     
     return gr.update(choices=structure_file_names, value=structure_file_names[0] if len(structure_file_names) > 0 else None, interactive=True), \
            gr.update(choices=input_file_names, value=input_file_name_value, interactive=True)
@@ -146,7 +146,7 @@ def on_run_calculation(working_directory_path, input_file_name):
 
     try:
         input_file_path = os.path.join(working_directory_path, input_file_name)
-        output_file_path = os.path.join(working_directory_path, input_file_name.split(".")[0] + ".log")
+        output_file_path = os.path.join(working_directory_path, os.path.splitext(input_file_name)[0] + ".log")
 
         # Run calculation
         cmd = ["g16", f"{input_file_path}", f"{output_file_path}"]

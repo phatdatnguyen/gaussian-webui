@@ -15,6 +15,7 @@ def on_working_directory_file_list_change(working_directory_file_list):
     return gr.update(choices=output_file_names, value=output_file_names[0] if len(output_file_names) > 0 else None, interactive=True)
 
 def on_load_result_file(working_directory_path, calculation_result_file_name):
+    data = None
     try:
         calculation_result_file_path = os.path.join(working_directory_path, calculation_result_file_name)
         parser = cclib.io.ccopen(calculation_result_file_path)
@@ -32,20 +33,20 @@ def on_load_result_file(working_directory_path, calculation_result_file_name):
             visualization_dropdown_choices=["Electron density", "Electrostatic potential"]
             MO_energies = data.moenergies
             if MO_energies is not None:
-                MO_df = pd.DataFrame(columns=["Molecular orbital", "Energy (hartree)"])
+                rows = []
                 for i, MO_energy in enumerate(MO_energies[0]):
-                    if i in data.homos:
-                        MO_df = MO_df._append({"Molecular orbital": f"MO {i+1} (HOMO)", "Energy (hartree)": "{:.4f}".format(MO_energy)}, ignore_index=True)
-                    else:
-                        MO_df = MO_df._append({"Molecular orbital": f"MO {i+1}", "Energy (hartree)": "{:.4f}".format(MO_energy)}, ignore_index=True)
-                    MO_name = f"MO {i+1}"
-                    visualization_dropdown_choices.append(MO_name)
+                    label = f"MO {i+1} (HOMO)" if i in data.homos else f"MO {i+1}"
+                    rows.append({"Molecular orbital": label, "Energy (hartree)": "{:.4f}".format(MO_energy)})
+                    visualization_dropdown_choices.append(f"MO {i+1}")
+                MO_df = pd.DataFrame(rows, columns=["Molecular orbital", "Energy (hartree)"])
             else:
                 MO_df = None
         else:
             show_enery_result = False
             energy_text = ""
             dipole_moment_text = ""
+            MO_df = None
+            visualization_dropdown_choices = ["Electron density", "Electrostatic potential"]
 
         # Display geometry optimization result
         if hasattr(data, "scfenergies") and len(data.scfenergies) > 1:
@@ -181,9 +182,10 @@ def on_visualize_surface(working_directory_path, output_file_name, visualization
         output_file_path = os.path.join(working_directory_path, output_file_name)
         mol = mol_from_gaussian_file(output_file_path)
 
-        check_file_path = os.path.join(working_directory_path, output_file_name.split('.')[0] + ".chk")
-        formated_check_file_path = os.path.join(working_directory_path, output_file_name.split('.')[0] + ".fchk")
-        cube_file_path = os.path.join(working_directory_path, output_file_name.split('.')[0] + ".cube")
+        file_stem = os.path.splitext(output_file_name)[0]
+        check_file_path = os.path.join(working_directory_path, file_stem + ".chk")
+        formated_check_file_path = os.path.join(working_directory_path, file_stem + ".fchk")
+        cube_file_path = os.path.join(working_directory_path, file_stem + ".cube")
         
         # Convert to formatted checkpoint file
         subprocess.run(["formchk", check_file_path, formated_check_file_path], check=True)
@@ -313,7 +315,7 @@ def on_export_data(working_directory_path, file_name, df):
     try:
         file_path = os.path.join(working_directory_path, file_name + ".csv")
         df.to_csv(file_path, encoding='utf-8', index=False)
-        status = "Data exported succesfully."
+        status = "Data exported successfully."
         return f"<span style='color:green;'>{status}</span>", get_files_in_working_directory(working_directory_path)
     except Exception as exc:
         status = f"Error exporting data: {exc}"
