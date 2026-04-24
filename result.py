@@ -366,7 +366,7 @@ def result_tab_content(working_directory_path_state, working_directory_file_list
                     export_peak_button = gr.Button(value="Export", interactive=False)
             with gr.Row():
                 absorption_emisson_spectrum_plot = gr.Plot(label="UV-Vis Spectrum")
-        with gr.Accordion(label="Frequency", visible=False) as nmr_result_accordion:
+        with gr.Accordion(label="NMR", visible=False) as nmr_result_accordion:
             with gr.Row():
                 with gr.Column(scale=1):
                     nmr_dataframe = gr.DataFrame(label="NMR signals")

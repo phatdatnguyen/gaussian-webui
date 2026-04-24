@@ -90,7 +90,6 @@ def mol_from_xyz_file(file_path, return_charge_and_multiplicity=False):
 def mol_from_gaussian_file(filename):
     # Parse the Gaussian file using cclib
     parser = cclib.io.ccopen(filename)
-    print(filename)
     data = parser.parse()
 
     # Extract atomic numbers and coordinates
