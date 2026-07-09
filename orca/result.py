@@ -1,14 +1,12 @@
 import os
 import time
-import subprocess
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.ticker import ScalarFormatter
 import gradio as gr
 import cclib
-import nglview
-from utils import get_files_in_working_directory, mol_from_gaussian_file, generate_ir_spectrum_interactive, generate_absorption_emission_spectrum_interactive, parse_nmr_shielding_constants, parse_nmr_jcouplings, calculate_chemical_shifts, generate_nmr_spectrum_interactive, parse_gaussian_geometry, compute_hydrogen_equivalence, compute_carbon_equivalence, build_nmr_peak_table, multiplicity_label
+from utils import get_files_in_working_directory, generate_ir_spectrum_interactive, generate_absorption_emission_spectrum_interactive, parse_nmr_shielding_constants, parse_nmr_jcouplings, calculate_chemical_shifts, generate_nmr_spectrum_interactive, compute_hydrogen_equivalence, compute_carbon_equivalence, build_nmr_peak_table, multiplicity_label, parse_orca_geometry
 
 def on_working_directory_file_list_change(working_directory_file_list):
     output_file_names = [f for f in working_directory_file_list if f.endswith('.log') ]
@@ -22,39 +20,39 @@ def _parse_reference(value, default):
         return default
 
 def on_load_result_file(working_directory_path, calculation_result_file_name, h_reference="32.9", c_reference="203.4", show_equivalent=True):
-    data = None
     try:
         calculation_result_file_path = os.path.join(working_directory_path, calculation_result_file_name)
         parser = cclib.io.ccopen(calculation_result_file_path)
         data = parser.parse()
-
+        
         # Display energy result
         if hasattr(data, "scfenergies") and hasattr(data, "moenergies"):
             show_enery_result = True
             energy = data.scfenergies[-1] / 27.2114 # in unit hartree
             energy_text = '{:.4f} (hartree)'.format(energy)
-            dipole_moment = data.moments[1]
-            dipole_magnitude = (dipole_moment[0]**2 + dipole_moment[1]**2 + dipole_moment[2]**2) ** 0.5
-            dipole_moment_text = "{:.4f} (Debye)".format(dipole_magnitude)
+            if hasattr(data, "moments"):
+                dipole_moment = data.moments[1]
+                dipole_magnitude = (dipole_moment[0]**2 + dipole_moment[1]**2 + dipole_moment[2]**2) ** 0.5
+                dipole_moment_text = "{:.4f} (Debye)".format(dipole_magnitude)
+            else:
+                dipole_moment_text = ""
 
             visualization_dropdown_choices=["Electron density", "Electrostatic potential"]
             MO_energies = data.moenergies
             if MO_energies is not None:
-                rows = []
+                MO_rows = []
                 for i, MO_energy in enumerate(MO_energies[0]):
                     label = f"MO {i+1} (HOMO)" if i in data.homos else f"MO {i+1}"
-                    rows.append({"Molecular orbital": label, "Energy (hartree)": "{:.4f}".format(MO_energy)})
+                    MO_rows.append({"Molecular orbital": label, "Energy (hartree)": "{:.4f}".format(MO_energy)})
                     visualization_dropdown_choices.append(f"MO {i+1}")
-                MO_df = pd.DataFrame(rows, columns=["Molecular orbital", "Energy (hartree)"])
+                MO_df = pd.DataFrame(MO_rows, columns=["Molecular orbital", "Energy (hartree)"])
             else:
                 MO_df = None
         else:
             show_enery_result = False
             energy_text = ""
             dipole_moment_text = ""
-            MO_df = None
-            visualization_dropdown_choices = ["Electron density", "Electrostatic potential"]
-
+        
         # Display geometry optimization result
         if hasattr(data, "scfenergies") and len(data.scfenergies) > 1:
             show_geometry_optimization = True
@@ -70,7 +68,7 @@ def on_load_result_file(working_directory_path, calculation_result_file_name, h_
         else:
             show_geometry_optimization = False
             energy_plot = None
-
+        
         # Display frequency result
         if hasattr(data, "vibfreqs"):
             show_frequency = True
@@ -101,14 +99,12 @@ def on_load_result_file(working_directory_path, calculation_result_file_name, h_
         # Display NMR result
         show_nmr = False
         with open(calculation_result_file_path) as output_file:
-            if "NMR Chemical Shielding Calculation using GIAO" in output_file.read():
+            if "CHEMICAL SHIELDINGS" in output_file.read():
                 show_nmr = True
         if show_nmr:
             # Get results
             shielding_data = parse_nmr_shielding_constants(calculation_result_file_path)
-            # Element lookup (1-based atom idx -> symbol) used to tag J-couplings.
-            atom_symbols = {atom_idx: element for atom_idx, element, _ in shielding_data}
-            jcoupling_data = parse_nmr_jcouplings(calculation_result_file_path, atom_symbols)
+            jcoupling_data = parse_nmr_jcouplings(calculation_result_file_path)
             reference_shieldings = {
                 'H': _parse_reference(h_reference, 32.9),
                 'C': _parse_reference(c_reference, 203.4)
@@ -116,15 +112,14 @@ def on_load_result_file(working_directory_path, calculation_result_file_name, h_
 
             shifts_data = calculate_chemical_shifts(shielding_data, reference_shieldings)
 
-            # Determine which nuclei are chemically equivalent (bonded to the same
-            # heavy atom / related by molecular symmetry) so their signals average
-            # into one peak. Geometry is read from the log (same atom order as the
-            # NMR nuclei; cclib reorders atoms). Falls back to shift-based grouping
-            # if the geometry cannot be read.
+            # Determine which hydrogens are chemically equivalent (bonded to the
+            # same heavy atom) so their signals average into one peak. Geometry is
+            # read from the log (same atom order as the NMR nuclei; cclib reorders
+            # atoms). Falls back to shift-based grouping if geometry is missing.
             h_equivalence = None
             c_equivalence = None
             try:
-                geom_symbols, geom_coords = parse_gaussian_geometry(calculation_result_file_path)
+                geom_symbols, geom_coords = parse_orca_geometry(calculation_result_file_path)
                 if geom_symbols:
                     h_equivalence = compute_hydrogen_equivalence(geom_coords, geom_symbols)
                     c_equivalence = compute_carbon_equivalence(geom_coords, geom_symbols)
@@ -166,9 +161,8 @@ def on_load_result_file(working_directory_path, calculation_result_file_name, h_
                 'Chemical Shift (ppm, ref: TMS)': chemical_shifts
             })
 
-            # Generate 1H NMR spectrum (equivalent H averaged into single peaks;
-            # J-coupling splits each peak into first-order multiplets). Narrow
-            # linewidth + dense sampling so the multiplet lines resolve.
+            # Generate 1H NMR spectrum (equivalent H averaged into single peaks).
+            # Narrow linewidth + dense sampling so J-coupling multiplets resolve.
             nmr_spectrum_1H = generate_nmr_spectrum_interactive(
                 shifts_data,
                 element_symbol='H',
@@ -180,8 +174,8 @@ def on_load_result_file(working_directory_path, calculation_result_file_name, h_
                 equivalence=h_equiv_arg
             )
 
-            # Generate 13C NMR spectrum (proton-decoupled: shown as singlets, so no
-            # J-coupling splitting is applied). Equivalent carbons average.
+            # Generate 13C NMR spectrum (proton-decoupled: shown as singlets,
+            # so no J-coupling splitting is applied). Equivalent carbons average.
             nmr_spectrum_13C = generate_nmr_spectrum_interactive(
                 shifts_data,
                 element_symbol='C',
@@ -229,85 +223,19 @@ def on_load_result_file(working_directory_path, calculation_result_file_name, h_
 
         status = f"Result file loaded."
         return f"<span style='color:green;'>{status}</span>", data, \
-               gr.update(visible=show_enery_result), energy_text, dipole_moment_text, MO_df, gr.update(choices=visualization_dropdown_choices), gr.update(interactive=True), \
+               gr.update(visible=show_enery_result), energy_text, dipole_moment_text, MO_df, \
                gr.update(visible=show_geometry_optimization), energy_plot, \
                gr.update(visible=show_frequency), ir_df, ir_spectrum, thero_df, gr.update(interactive=show_frequency), \
                gr.update(visible=show_absorption_emission), None, None, gr.update(interactive=show_absorption_emission), \
                gr.update(visible=show_nmr), nmr_df, gr.update(value=nmr_multiplet_df, visible=show_averaged_tables), nmr_spectrum_1H, nmr_spectrum_13C, gr.update(value=nmr_multiplet_13C_df, visible=show_averaged_tables), gr.update(interactive=show_nmr)
     except Exception as exc:
         status = f"Error loading result file: {exc}"
-        return f"<span style='color:red;'>{status}</span>", data, \
-               gr.update(visible=False), "", "", None, gr.update(), gr.update(interactive=False), \
+        return f"<span style='color:red;'>{status}</span>", None, \
+               gr.update(visible=False), "", "", None, \
                gr.update(visible=False), None, \
                gr.update(visible=False), None, None, None, gr.update(interactive=False), \
                gr.update(visible=False), None, None, gr.update(interactive=False), \
-               gr.update(visible=False), None, gr.update(value=None, visible=False), None, None, gr.update(value=None, visible=False), gr.update(interactive=False)
-
-def on_visualization_change(visualization_dropdown):
-    return gr.update(visible=(visualization_dropdown == "Electron density"))
-
-def on_visualize_surface(working_directory_path, output_file_name, visualization, color1, color2, opacity, isolevel):
-    # Set options for cube file generation
-    try:
-        output_file_path = os.path.join(working_directory_path, output_file_name)
-        mol = mol_from_gaussian_file(output_file_path)
-
-        file_stem = os.path.splitext(output_file_name)[0]
-        check_file_path = os.path.join(working_directory_path, file_stem + ".chk")
-        formated_check_file_path = os.path.join(working_directory_path, file_stem + ".fchk")
-        cube_file_path = os.path.join(working_directory_path, file_stem + ".cube")
-        
-        # Convert to formatted checkpoint file
-        subprocess.run(["formchk", check_file_path, formated_check_file_path], check=True)
-
-        # Generate cube file
-        os.makedirs("./static/surface_visualization", exist_ok=True)
-        if visualization == "Electron density":
-            subprocess.run(['cubegen', '0', 'Density=SCF', formated_check_file_path, cube_file_path], check=True)
-            
-            # Get the cube file
-            view = nglview.show_rdkit(mol)
-            view.add_component(cube_file_path)
-
-            # Adjust visualization settings
-            view.component_1.update_surface(opacity=opacity, color=color1, isolevel=isolevel)
-            view.camera = 'orthographic'
-        elif visualization == "Electrostatic potential":
-            subprocess.run(['cubegen', '0', 'Potential=SCF', formated_check_file_path, cube_file_path], check=True)
-            
-            # Get the cube file
-            view = nglview.show_rdkit(mol)
-            view.add_component(cube_file_path)
-
-            # Adjust visualization settings
-            view.component_1.update_surface(opacity=opacity, color=color1, isolevel=isolevel)
-            view.camera = 'orthographic'
-        else: # MO visualization
-            MO_index = int(visualization.split(" ")[1])
-            subprocess.run(['cubegen', '0', f'MO={MO_index}', formated_check_file_path, cube_file_path], check=True)
-            
-            # Get the cube file
-            view = nglview.show_rdkit(mol)
-            view.add_component(cube_file_path)
-            view.add_component(cube_file_path)
-
-            # Adjust visualization settings
-            view.component_1.update_surface(opacity=opacity, color=color1, isolevel=2)
-            view.component_2.update_surface(opacity=opacity, color=color2, isolevel=-2)
-            view.camera = 'orthographic'
-        
-        # Write the widget to HTML
-        if os.path.exists('./static/surface_visualization/cube_file.html'):
-            os.remove('./static/surface_visualization/cube_file.html')
-        nglview.write_html('./static/surface_visualization/cube_file.html', [view])
-
-        # Read the HTML file
-        timestamp = int(time.time())
-        html = f'<iframe src="/static/surface_visualization/cube_file.html?ts={timestamp}" height="600" width="600" title="NGL View"></iframe>'
-    except Exception as exc:
-        return "Visualization error!\n" + str(exc)
-    
-    return html
+               gr.update(visible=False), None, None, None, None, None, gr.update(interactive=False)
 
 def on_show_absorption_spectrum(data):
     if hasattr(data, 'etenergies') and hasattr(data, 'etoscs'):
@@ -385,7 +313,7 @@ def on_export_data(working_directory_path, file_name, df):
     try:
         file_path = os.path.join(working_directory_path, file_name + ".csv")
         df.to_csv(file_path, encoding='utf-8', index=False)
-        status = "Data exported successfully."
+        status = "Data exported succesfully."
         return f"<span style='color:green;'>{status}</span>", get_files_in_working_directory(working_directory_path)
     except Exception as exc:
         status = f"Error exporting data: {exc}"
@@ -404,16 +332,8 @@ def result_tab_content(working_directory_path_state, working_directory_file_list
                 with gr.Column(scale=1):
                     energy_texbox = gr.Textbox(label="Energy", value="Not calculated")
                     dipole_moment_texbox = gr.Textbox(label="Dipole moment", value="Not calculated")
-                    mo_dataframe = gr.DataFrame(label="Molecular orbitals")
                 with gr.Column(scale=1):
-                    visualization_dropdown = gr.Dropdown(label="Visualization", value="Electron density", choices=["Electron density", "Electrostatic potential"])
-                    with gr.Row():
-                        visualization_color1 = gr.ColorPicker(label="Color 1", value="#0000ff")
-                        visualization_color2 = gr.ColorPicker(label="Color 2", value="#ff0000")
-                        visualization_opacity = gr.Slider(label="Opacity", value=0.8, minimum=0, maximum=1, step=0.01)
-                        visualization_isolevel = gr.Slider(label="Isolevel", value=0.05, minimum=0, maximum=1, step=0.01)
-                    visualize_button = gr.Button(value="Visualize", interactive=False)
-                    visualization_html = gr.HTML(label="Visualization")
+                    mo_dataframe = gr.DataFrame(label="Molecular orbitals")
         with gr.Accordion(label="Geometry Optimization", visible=False) as opt_result_accordion:
             with gr.Row():
                 energy_plot = gr.Plot(label="Energy plot")
@@ -459,10 +379,10 @@ def result_tab_content(working_directory_path_state, working_directory_file_list
                         nmr_spectrum_13C = gr.Plot(label="13C NMR spectrum")
                     with gr.Row():
                         nmr_multiplet_13C_dataframe = gr.DataFrame(label="Averaged 13C signals")
-
+    
     working_directory_file_list_state.change(on_working_directory_file_list_change, working_directory_file_list_state, calculation_result_file_dropdown)
     nmr_result_outputs = [status_markdown, data_state,
-                          energy_result_accordion, energy_texbox, dipole_moment_texbox, mo_dataframe, visualization_dropdown, visualize_button,
+                          energy_result_accordion, energy_texbox, dipole_moment_texbox, mo_dataframe,
                           opt_result_accordion, energy_plot,
                           frequency_result_accordion, ir_dataframe, ir_spectrum_plot, thermo_dataframe, export_ir_button,
                           absorption_emission_result_accordion, peak_dataframe, absorption_emisson_spectrum_plot, export_peak_button,
@@ -470,16 +390,9 @@ def result_tab_content(working_directory_path_state, working_directory_file_list
     load_button.click(on_load_result_file,
                       [working_directory_path_state, calculation_result_file_dropdown, h_reference_textbox, c_reference_textbox, show_equivalent_checkbox],
                       nmr_result_outputs)
-    # Re-render the NMR peaks/tables when the averaging toggle changes.
-    show_equivalent_checkbox.change(on_load_result_file,
-                                    [working_directory_path_state, calculation_result_file_dropdown, h_reference_textbox, c_reference_textbox, show_equivalent_checkbox],
-                                    nmr_result_outputs)
-    # Re-render the NMR spectra/tables with the user-supplied reference shieldings.
     refresh_nmr_button.click(on_load_result_file,
                              [working_directory_path_state, calculation_result_file_dropdown, h_reference_textbox, c_reference_textbox, show_equivalent_checkbox],
                              nmr_result_outputs)
-    visualization_dropdown.change(on_visualization_change, visualization_dropdown, visualization_isolevel)
-    visualize_button.click(on_visualize_surface, [working_directory_path_state, calculation_result_file_dropdown, visualization_dropdown, visualization_color1, visualization_color2, visualization_opacity, visualization_isolevel], visualization_html)
     export_ir_button.click(on_export_data, [working_directory_path_state, ir_filename_textbox, ir_dataframe], [status_markdown, working_directory_file_list_state])
     absorption_spectrum_button.click(on_show_absorption_spectrum, data_state, [peak_dataframe, absorption_emisson_spectrum_plot])
     export_peak_button.click(on_export_data, [working_directory_path_state, peak_filename_textbox, peak_dataframe], [status_markdown, working_directory_file_list_state])
