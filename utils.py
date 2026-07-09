@@ -599,16 +599,326 @@ def calculate_chemical_shifts(shielding_data, reference_shieldings):
             print(f"No reference shielding constant for element {element}. Skipping atom {atom_idx}.")
     return shifts_data
 
+def _fortran_float(token):
+    """Convert a Gaussian Fortran float token (e.g. '0.311173D+02') to float."""
+    return float(token.replace('D', 'E').replace('d', 'e'))
+
+def parse_nmr_jcouplings(logfile, atom_symbols=None):
+    """Parse NMR spin-spin (J) coupling constants from a Gaussian output file.
+
+    Gaussian prints the isotropic couplings as the symmetric lower-triangular
+    matrix under 'Total nuclear spin-spin coupling J (Hz):', in column blocks of
+    up to five nuclei, using Fortran D-notation and 1-based atom indices::
+
+        Total nuclear spin-spin coupling J (Hz):
+                        1             2             3   ...
+              1  0.000000D+00
+              2  0.311173D+02  0.000000D+00
+              ...
+
+    ``atom_symbols`` is an optional {atom_idx: element} map (1-based, e.g. built
+    from parse_nmr_shielding_constants) used to tag each nucleus; when omitted the
+    element fields are left blank. Returns a list of tuples
+    ``(atom_a_idx, element_a, atom_b_idx, element_b, J_iso_Hz)`` for a != b, each
+    pair reported once (a > b), matching the shape parse_nmr_jcouplings uses in the
+    ORCA reader.
+    """
+    atom_symbols = atom_symbols or {}
+    jcouplings = []
+
+    with open(logfile, 'r') as f:
+        lines = f.readlines()
+
+    # Anchor on the final "Total ... J (Hz)" block (skip the K matrix and the
+    # per-mechanism FC/SD/PSO/DSO contributions printed earlier).
+    start = None
+    for i, line in enumerate(lines):
+        if 'Total nuclear spin-spin coupling J (Hz)' in line:
+            start = i + 1
+            break
+    if start is None:
+        print("No NMR spin-spin coupling data found in the log file.")
+        return jcouplings
+
+    col_indices = []
+    for line in lines[start:]:
+        tokens = line.split()
+        if not tokens:
+            break
+        # A header line lists only column (nucleus) indices - all plain integers.
+        if all(re.fullmatch(r'\d+', t) for t in tokens):
+            col_indices = [int(t) for t in tokens]
+            continue
+        # A data row: leading integer row index followed by Fortran floats.
+        if re.fullmatch(r'\d+', tokens[0]) and 'D' in line:
+            row_idx = int(tokens[0])
+            values = tokens[1:]
+            for k, value in enumerate(values):
+                if k >= len(col_indices):
+                    break
+                col_idx = col_indices[k]
+                if col_idx == row_idx:
+                    continue  # skip the zero diagonal
+                j_hz = _fortran_float(value)
+                jcouplings.append((
+                    row_idx, atom_symbols.get(row_idx, ''),
+                    col_idx, atom_symbols.get(col_idx, ''),
+                    j_hz,
+                ))
+            continue
+        # Anything else (e.g. "End of Minotr ...") marks the end of the matrix.
+        break
+
+    if not jcouplings:
+        print("No NMR spin-spin coupling data found in the log file.")
+    return jcouplings
+
+# Symbols indexed by atomic number (Z=1..54), enough for typical organic NMR.
+_ATOMIC_SYMBOLS = [
+    '', 'H', 'He', 'Li', 'Be', 'B', 'C', 'N', 'O', 'F', 'Ne',
+    'Na', 'Mg', 'Al', 'Si', 'P', 'S', 'Cl', 'Ar', 'K', 'Ca',
+    'Sc', 'Ti', 'V', 'Cr', 'Mn', 'Fe', 'Co', 'Ni', 'Cu', 'Zn',
+    'Ga', 'Ge', 'As', 'Se', 'Br', 'Kr', 'Rb', 'Sr', 'Y', 'Zr',
+    'Nb', 'Mo', 'Tc', 'Ru', 'Rh', 'Pd', 'Ag', 'Cd', 'In', 'Sn',
+    'Sb', 'Te', 'I', 'Xe',
+]
+
+def parse_gaussian_geometry(logfile):
+    """Parse the last 'Input/Standard orientation' block from a Gaussian log.
+
+    Returns (symbols, coords) in the SAME atom order as Gaussian's NMR nucleus
+    indices (center numbering), which is what the equivalence helpers below expect.
+    ``symbols`` is a 0-indexed list of element symbols (center i maps to index i-1);
+    ``coords`` is an (N, 3) numpy array in Angstrom.
+    """
+    # atom line: center#  atomic#  atomic-type  X  Y  Z
+    line_pattern = re.compile(
+        r'^\s*\d+\s+(\d+)\s+\d+\s+(-?\d+\.\d+)\s+(-?\d+\.\d+)\s+(-?\d+\.\d+)\s*$'
+    )
+    with open(logfile, 'r') as f:
+        lines = f.readlines()
+
+    symbols, coords = [], []
+    for i, line in enumerate(lines):
+        if 'orientation:' in line:
+            block_symbols, block_coords = [], []
+            # Skip the two column-header rows and the dashed separators.
+            j = i + 1
+            while j < len(lines) and not line_pattern.match(lines[j]):
+                if 'Coordinates' not in lines[j] and 'Number' not in lines[j] \
+                        and set(lines[j].strip()) not in (set('-'), set()):
+                    break
+                j += 1
+            while j < len(lines):
+                m = line_pattern.match(lines[j])
+                if not m:
+                    break
+                atomic_number = int(m.group(1))
+                symbol = _ATOMIC_SYMBOLS[atomic_number] if atomic_number < len(_ATOMIC_SYMBOLS) else 'X'
+                block_symbols.append(symbol)
+                block_coords.append([float(m.group(2)), float(m.group(3)), float(m.group(4))])
+                j += 1
+            if block_symbols:
+                symbols, coords = block_symbols, block_coords  # keep the last block
+    return symbols, np.asarray(coords, dtype=float)
+
+# Cordero covalent radii (Angstrom) for the elements common in organic NMR.
+# Used only for simple distance-based bond perception.
+_COVALENT_RADII = {
+    'H': 0.31, 'B': 0.84, 'C': 0.76, 'N': 0.71, 'O': 0.66, 'F': 0.57,
+    'Si': 1.11, 'P': 1.07, 'S': 1.05, 'Cl': 1.02, 'Br': 1.20, 'I': 1.39,
+}
+
+def perceive_bonds(coords, symbols, tolerance=1.3):
+    """Infer bonds from interatomic distances and covalent radii.
+
+    Returns a list of sets, where adjacency[i] holds the indices bonded to atom i.
+    Two atoms are bonded when their distance is below (r_i + r_j) * tolerance.
+    """
+    coords = np.asarray(coords, dtype=float)
+    n = len(symbols)
+    adjacency = [set() for _ in range(n)]
+    for i in range(n):
+        for j in range(i + 1, n):
+            r_i = _COVALENT_RADII.get(symbols[i], 0.77)
+            r_j = _COVALENT_RADII.get(symbols[j], 0.77)
+            dist = float(np.linalg.norm(coords[i] - coords[j]))
+            if 0.0 < dist < (r_i + r_j) * tolerance:
+                adjacency[i].add(j)
+                adjacency[j].add(i)
+    return adjacency
+
+def morgan_ranks(coords, symbols):
+    """Assign each atom a topological-symmetry rank (Morgan-style refinement).
+
+    Atoms start with an invariant of (element, degree) on the perceived bond graph
+    and are iteratively re-ranked by (own rank, sorted neighbour ranks) until the set
+    of distinct ranks stops growing. Two atoms sharing a final rank are equivalent by
+    the symmetry of the whole molecular graph. Ranks are opaque grouping keys only.
+    """
+    adjacency = perceive_bonds(coords, symbols)
+    n = len(symbols)
+    ranks = [hash((symbols[i], len(adjacency[i]))) for i in range(n)]
+    for _ in range(n):  # converges in at most N refinement rounds
+        new_ranks = [
+            hash((ranks[i], tuple(sorted(ranks[j] for j in adjacency[i]))))
+            for i in range(n)
+        ]
+        if len(set(new_ranks)) == len(set(ranks)):
+            break  # partition stable: no new classes distinguished
+        ranks = new_ranks
+    return adjacency, ranks
+
+def compute_hydrogen_equivalence(coords, symbols):
+    """Group hydrogens that are bonded to symmetry-equivalent heavy atoms.
+
+    Freely-rotating groups (CH3, CH2, NH2) average their protons to a single signal,
+    and so do protons on heavy atoms that are equivalent by molecular symmetry (e.g.
+    the two methyls of isopropanol or tert-butyl). Hydrogens are therefore keyed on the
+    Morgan rank of their bonded heavy atom, which reduces to the bonded-atom identity
+    when the molecule has no symmetry. ``coords``/``symbols`` must be in Gaussian NMR
+    nucleus order (use parse_gaussian_geometry, NOT cclib, which reorders atoms).
+    Returns a dict {hydrogen_atom_idx: group_key} keyed by Gaussian's 1-based index.
+
+    NOTE: equivalence is topological only. Diastereotopic protons on the same carbon are
+    treated as equivalent (a deliberate simplification, since a static geometry carries
+    no stereochemistry in the graph).
+    """
+    adjacency, ranks = morgan_ranks(coords, symbols)
+    equivalence = {}
+    for idx, sym in enumerate(symbols):
+        if sym != 'H':
+            continue
+        heavy_neighbors = [j for j in adjacency[idx] if symbols[j] != 'H']
+        # Key on the bonded heavy atom's symmetry rank so protons on equivalent heavy
+        # atoms merge. With no heavy neighbor (e.g. H2), the hydrogen forms its own group.
+        # +1 converts the 0-based list index to Gaussian's 1-based nucleus index.
+        equivalence[idx + 1] = ('heavy', ranks[heavy_neighbors[0]]) if heavy_neighbors else f"H{idx + 1}"
+    return equivalence
+
+def compute_carbon_equivalence(coords, symbols):
+    """Group carbons that are topologically equivalent by molecular symmetry.
+
+    Unlike hydrogens (which also average within a freely-rotating group), equivalent
+    carbons are related by the symmetry of the whole molecule (e.g. the two methyls of
+    isopropanol, the three methyls of tert-butyl, or the para carbons of a symmetric
+    ring). Carbons sharing a Morgan rank (see morgan_ranks) merge into a single averaged
+    signal, independent of small DFT shift differences.
+
+    ``coords``/``symbols`` must be in Gaussian NMR nucleus order (use
+    parse_gaussian_geometry, NOT cclib, which reorders atoms). Returns a dict
+    {carbon_atom_idx: rank} keyed by Gaussian's 1-based index; the rank is only used as
+    an opaque grouping key.
+    """
+    _, ranks = morgan_ranks(coords, symbols)
+    return {i + 1: ranks[i] for i, sym in enumerate(symbols) if sym == 'C'}
+
+# Multiplicity letters for first-order multiplets (number of equal coupling
+# partners -> name). More than one coupling group concatenates letters (e.g. dd).
+_MULTIPLICITY_LETTER = {1: 'd', 2: 't', 3: 'q', 4: 'p', 5: 'h', 6: 'hept'}
+
+def build_nmr_peak_table(shifts_data, element_symbol, jcouplings=None, equivalence=None, j_threshold=0.5):
+    """Group nuclei of ``element_symbol`` into averaged multiplet peaks.
+
+    Equivalent nuclei merge into one peak whose chemical shift is the average of
+    the members and whose intensity is the member count. ``equivalence`` is an
+    optional {atom_idx: group_key} map (e.g. from compute_hydrogen_equivalence);
+    when omitted, nuclei are grouped by rounded chemical shift (~0.01 ppm).
+
+    Coupling between two equivalent groups A and B is treated to first order:
+    every nucleus of A is split by B into (size(B) + 1) lines with a single
+    coupling constant equal to the AVERAGE of all pairwise A-B couplings. The
+    multiplicity therefore comes from the partner group SIZE (not from how many
+    couplings the calculation happened to print for one atom), which is what
+    makes a CH3-CH2 pair read as the expected triplet/quartet even though the
+    individual per-atom couplings differ in a single static geometry. Couplings
+    whose averaged magnitude is below ``j_threshold`` (Hz) are dropped as
+    unresolvable.
+
+    Returns a list of peak dicts sorted by ascending shift::
+
+        {'atom_idxs': [...], 'element': str, 'shift': float, 'count': int,
+         'couplings': [{'partner_idxs': (...), 'n': int, 'J': float}, ...]}
+    """
+    shifts = [(i, e, s) for i, e, s in shifts_data if e == element_symbol]
+    if not shifts:
+        return []
+
+    def key_of(atom_idx, shift):
+        if equivalence is not None and atom_idx in equivalence:
+            return ('grp', equivalence[atom_idx])
+        return ('shift', round(shift, 2))
+
+    groups = {}
+    for atom_idx, element, shift in shifts:
+        k = key_of(atom_idx, shift)
+        grp = groups.setdefault(k, {'atom_idxs': [], 'shifts': []})
+        grp['atom_idxs'].append(atom_idx)
+        grp['shifts'].append(shift)
+
+    # Pairwise homonuclear coupling lookup: (atom_a, atom_b) -> J_Hz (both ways).
+    pair_j = {}
+    if jcouplings:
+        for idx_a, elem_a, idx_b, elem_b, j_hz in jcouplings:
+            if elem_a == element_symbol and elem_b == element_symbol:
+                pair_j[(idx_a, idx_b)] = j_hz
+                pair_j[(idx_b, idx_a)] = j_hz
+
+    group_items = list(groups.items())
+    peaks = []
+    for k, grp in group_items:
+        atom_idxs = sorted(grp['atom_idxs'])
+        avg_shift = sum(grp['shifts']) / len(grp['shifts'])
+        couplings = []
+        for k2, grp2 in group_items:
+            if k2 == k:
+                continue  # mutually equivalent nuclei do not split each other
+            partner_idxs = sorted(grp2['atom_idxs'])
+            js = [pair_j[(a, b)] for a in atom_idxs for b in partner_idxs if (a, b) in pair_j]
+            if not js:
+                continue
+            j_avg = sum(js) / len(js)
+            if abs(j_avg) < j_threshold:
+                continue  # negligible / unresolvable coupling
+            couplings.append({
+                'partner_idxs': tuple(partner_idxs),
+                'n': len(partner_idxs),  # multiplicity from partner GROUP size
+                'J': j_avg,
+            })
+        couplings.sort(key=lambda c: -abs(c['J']))
+        peaks.append({
+            'atom_idxs': atom_idxs,
+            'element': element_symbol,
+            'shift': avg_shift,
+            'count': len(atom_idxs),
+            'couplings': couplings,
+        })
+
+    peaks.sort(key=lambda p: p['shift'])
+    return peaks
+
+def multiplicity_label(couplings):
+    """Human-readable multiplicity (s/d/t/q/...) for a peak's coupling list."""
+    if not couplings:
+        return 's'
+    return ''.join(_MULTIPLICITY_LETTER.get(c['n'], 'm') for c in couplings)
+
 def lorentzian_nmr(x, x0, gamma):
     return (gamma**2) / ((x - x0)**2 + gamma**2)
 
-def generate_nmr_spectrum_interactive(shifts_data, element_symbol, linewidth=0.5, points=10000, frequency=400, plot_range=None):
+def generate_nmr_spectrum_interactive(shifts_data, element_symbol, linewidth=0.5, points=10000, frequency=400, plot_range=None, jcouplings=None, equivalence=None):
     # Filter shifts for the desired element
     shifts = [(atom_idx, element, shift) for atom_idx, element, shift in shifts_data if element == element_symbol]
 
     if not shifts:
         print(f"No chemical shifts found for element {element_symbol}.")
         return
+
+    # Group nuclei into averaged multiplet peaks. Equivalent nuclei (per the
+    # `equivalence` map, or by rounded shift when absent) collapse to one peak
+    # whose shift is averaged and whose height scales with the member count.
+    peaks = build_nmr_peak_table(shifts_data, element_symbol,
+                                 jcouplings=jcouplings, equivalence=equivalence)
 
     # Create the chemical shift axis
     if plot_range:
@@ -625,19 +935,26 @@ def generate_nmr_spectrum_interactive(shifts_data, element_symbol, linewidth=0.5
     # Convert linewidth from Hz to ppm
     lw_ppm = linewidth / frequency
 
-    # Count occurrences of each chemical shift for intensity scaling
-    shift_counts = {}
-    for atom_idx, element, shift in shifts:
-        shift_counts[shift] = shift_counts.get(shift, 0) + 1
-
-    # Generate Lorentzian peaks with intensities and collect peak positions for annotations
+    # Generate Lorentzian multiplets per group and collect positions for annotations
     annotations = []
-    for atom_idx, element, shift in shifts:
-        intensity = shift_counts[shift]
-        spectrum += intensity * lorentzian_nmr(x, shift, lw_ppm)
+    for peak in peaks:
+        shift = peak['shift']
+        intensity = peak['count']
+        # First-order multiplet: each coupled partner halves the weight and
+        # splits the peak by J/freq (Hz -> ppm). Coupling to n equivalent
+        # partners splits n times, giving an (n+1)-line Pascal multiplet.
+        sub_peaks = [(shift, 1.0)]
+        for c in peak['couplings']:
+            half_j_ppm = (c['J'] / 2.0) / frequency
+            for _ in range(c['n']):
+                sub_peaks = [(p - half_j_ppm, w / 2.0) for p, w in sub_peaks] + \
+                            [(p + half_j_ppm, w / 2.0) for p, w in sub_peaks]
+        for pos, weight in sub_peaks:
+            spectrum += intensity * weight * lorentzian_nmr(x, pos, lw_ppm)
+        label = f"{element_symbol}-" + ",".join(str(i) for i in peak['atom_idxs'])
         annotations.append({
             'shift': shift,
-            'atom_label': f"{element}-{atom_idx}",
+            'atom_label': label,
             'intensity': intensity
         })
 
@@ -656,11 +973,13 @@ def generate_nmr_spectrum_interactive(shifts_data, element_symbol, linewidth=0.5
         name=f'{element_symbol} NMR Spectrum'
     ))
 
-    # Add peak annotations
+    # Annotate at the centroid (chemical shift) using the actual spectrum value
+    # so the arrow lands on the multiplet envelope rather than above it.
     for ann in annotations:
+        idx = int(np.argmin(np.abs(x - ann['shift'])))
         fig.add_annotation(
             x=ann['shift'],
-            y=lorentzian_nmr(ann['shift'], ann['shift'], lw_ppm) / np.max(spectrum),
+            y=spectrum[idx],
             text=ann['atom_label'],
             showarrow=True,
             arrowhead=1,
