@@ -1,6 +1,6 @@
 flagged/
 gaussian-env/
-conformers/
+data/
 static/
 __pycache__/
 .vs/
@@ -19,4 +19,3 @@ __pycache__/
 *.html
 *.cube
 *.7
-nmr_analysis.py
