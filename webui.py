@@ -50,7 +50,7 @@ def find_available_port(start_port=7860):
 
 available_port = find_available_port()
 
-with gr.Blocks(css_paths=Path('./styles.css')) as blocks:
+with gr.Blocks(css_paths=[Path('./styles.css')]) as blocks:
     with gr.Row():
         working_directory_path_state, working_directory_file_list_state = working_directory_blocks()
         with gr.Column(scale=2):

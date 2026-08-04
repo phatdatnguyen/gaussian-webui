@@ -5,6 +5,7 @@ static/
 __pycache__/
 .vs/
 .clean
+.claude
 
 *.gjf
 *.log

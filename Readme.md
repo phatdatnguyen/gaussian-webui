@@ -33,11 +33,11 @@ source gaussian-env/bin/activate
 pip install psutil
 pip install rdkit
 pip install cclib
+pip install matplotlib
 pip install plotly
-pip install gradio_molecule2d
-pip uninstall gradio
 pip install gradio==5.50.0
 pip install nglview==4.0
+pip install gradio_molecule2d --no-deps
 ```
 
 ## Start web UI
