@@ -3,7 +3,19 @@
     "allow": [
       "Bash(wsl -d Ubuntu-24.04 -- bash -lc 'cd /home/datnguyen/github/gaussian-webui && cp /tmp/test_nmr.py ./_test_nmr.py 2>/dev/null; ls gaussian-env/bin/python')",
       "Bash(wsl *)",
-      "Bash(python -m py_compile result.py)"
+      "Bash(python -m py_compile result.py)",
+      "Read(///wsl.localhost/Ubuntu/home/datnguyen/github/**)",
+      "Read(///wsl.localhost/Ubuntu/home/datnguyen/github/gaussian-webui/**)",
+      "PowerShell(wsl -e bash -lc \"cd /home/datnguyen/github/gaussian-webui && ./gaussian-env/bin/python -c 'import rdkit, pandas, gradio; print\\(rdkit.__version__, pandas.__version__, gradio.__version__\\)'\")",
+      "PowerShell($env:WSLENV=\"\"; wsl.exe --cd /home/datnguyen/github/gaussian-webui -- ./gaussian-env/bin/python -c \"import rdkit, pandas, gradio; print\\(rdkit.__version__, pandas.__version__, gradio.__version__\\)\")",
+      "PowerShell(wsl.exe -l -v; wsl.exe -d Ubuntu -- ls /home/)",
+      "PowerShell(wsl.exe -d Ubuntu --cd /home/datnguyen/github/gaussian-webui -- ./gaussian-env/bin/python -c \"import rdkit, pandas, gradio; print\\(rdkit.__version__, pandas.__version__, gradio.__version__\\)\")",
+      "PowerShell(wsl.exe -d Ubuntu --cd /home/datnguyen/github/gaussian-webui -- ./gaussian-env/bin/python _tmp_test_conf.py)",
+      "Read(//c/Users/nguye/.codex/**)",
+      "PowerShell(wsl.exe -d Ubuntu --cd /home/datnguyen/github/gaussian-webui -- ./gaussian-env/bin/python _tmp_diag.py)",
+      "PowerShell(wsl.exe -d Ubuntu --cd /home/datnguyen/github/gaussian-webui -- ./gaussian-env/bin/python _tmp_diag2.py)",
+      "Bash(python -)",
+      "PowerShell(wsl.exe -d Ubuntu --cd /home/datnguyen/github/gaussian-webui -- timeout 420 ./gaussian-env/bin/python _tmp_diag2.py)"
     ]
   }
 }
