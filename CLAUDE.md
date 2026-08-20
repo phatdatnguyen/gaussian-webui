@@ -39,6 +39,15 @@ Each tab module exposes `<name>_tab_content(working_directory_path_state, workin
 
 Working directories are `./data/<name>/` (gitignored, as are all chemistry file types).
 
+### Running and stopping a calculation
+
+`on_run_calculation` is a **generator** — it yields a blue "Running..." status once a second so the
+status bar shows elapsed time, then yields the final green/red/orange line. The `g16` job is started
+with `subprocess.Popen(..., start_new_session=True)` and its handle parked in a module-level
+`running_calculation_process`; the Stop button's handler signals the whole process group, because
+killing `g16` alone would strand the Gaussian link executables it spawns. Stop works because Gradio
+gives each event listener its own concurrency slot, so the click runs while the generator streams.
+
 ### Status reporting convention
 
 Handlers return an HTML string into `status_markdown` — `<span style='color:green;'>` on success, `red` on failure — and catch exceptions rather than raising. `gr.Warning(...)` is used for transient popups (validation, file operations). Note that `conformer_generation.py` shadows the `status_markdown` parameter with a local `gr.Markdown()`, so its status renders inside the tab rather than in the shared top bar.
@@ -52,6 +61,8 @@ Handlers return an HTML string into `status_markdown` — `<span style='color:gr
 ### Two things that will bite you
 
 **XYZ files here are not standard XYZ.** `conformer_to_xyz_file` writes `"<charge> <multiplicity>"` as line 1, then atom lines — no atom count, no comment line. `mol_from_xyz_file` expects exactly that. Files from outside tools will not parse.
+
+**A custom basis set cannot be pasted into the input verbatim.** Gaussian ends the `gen` section at the first blank line, and Basis Set Exchange files start with a `!` comment header followed by blank lines, which would truncate the basis to nothing. `build_custom_basis_section` strips comments and blank lines, keeps only the element blocks the molecule actually needs, and re-inserts the single blank line that separates basis functions from pseudopotentials. `gen` vs `genecp` is decided from the *filtered* section, since a file's ECP blocks may all get filtered out.
 
 **Structures loaded from `.xyz`/`.log` have no bonds.** Both paths go through `add_bonds(...)`, which infers connectivity from covalent radii × a distance factor, followed by `Chem.SanitizeMol`. Perception failures on unusual geometries surface here.
 

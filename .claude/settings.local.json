@@ -15,7 +15,22 @@
       "PowerShell(wsl.exe -d Ubuntu --cd /home/datnguyen/github/gaussian-webui -- ./gaussian-env/bin/python _tmp_diag.py)",
       "PowerShell(wsl.exe -d Ubuntu --cd /home/datnguyen/github/gaussian-webui -- ./gaussian-env/bin/python _tmp_diag2.py)",
       "Bash(python -)",
-      "PowerShell(wsl.exe -d Ubuntu --cd /home/datnguyen/github/gaussian-webui -- timeout 420 ./gaussian-env/bin/python _tmp_diag2.py)"
+      "PowerShell(wsl.exe -d Ubuntu --cd /home/datnguyen/github/gaussian-webui -- timeout 420 ./gaussian-env/bin/python _tmp_diag2.py)",
+      "PowerShell(wsl.exe -d Ubuntu --cd /home/datnguyen/github/gaussian-webui -- ./gaussian-env/bin/python _tmp_test_basis.py)",
+      "PowerShell(wsl.exe -d Ubuntu --cd /home/datnguyen/github/gaussian-webui -- ./gaussian-env/bin/python _tmp_test_sort.py)",
+      "PowerShell(wsl.exe -d Ubuntu --cd /home/datnguyen/github/gaussian-webui -- git log --oneline -3; wsl.exe -d Ubuntu --cd /home/datnguyen/github/gaussian-webui -- git status --short --untracked-files=all -- CLAUDE.md conformer_generation.py)",
+      "Bash(awk 'NF==0 {print \"blank line at \" NR}' pcSseg-2.txt)",
+      "PowerShell(wsl.exe -d Ubuntu --cd /home/datnguyen/github/gaussian-webui -- ./gaussian-env/bin/python _tmp_test_real.py)",
+      "PowerShell(wsl.exe -d Ubuntu -- bash -lc \"which g16 formchk cubegen 2>/dev/null; echo '---'; echo GAUSS_EXEDIR=\\\\$GAUSS_EXEDIR; ls -d /opt/g16 /usr/local/g16 ~/g16 2>/dev/null; echo '\\(end\\)'\")",
+      "Read(//opt/**)",
+      "PowerShell(wsl.exe -d Ubuntu -- bash -lc 'command -v g16 || echo \"g16 NOT on PATH\"; printf \"GAUSS_EXEDIR=[%s]\\\\n\" \"$GAUSS_EXEDIR\"')",
+      "PowerShell(wsl.exe -d Ubuntu -- bash -lc 'type g16; echo \"----\"; printf \"EXEDIR=[%s]\\\\n\" \"$GAUSS_EXEDIR\"; echo \"----\"; g16 --help 2>&1 | head -5')",
+      "Bash(cat)",
+      "Bash(cp /tmp/_rewire.py ./_rewire.py)",
+      "PowerShell(wsl.exe -d Ubuntu --cd /home/datnguyen/github/gaussian-webui -- ./gaussian-env/bin/python _rewire.py; wsl.exe -d Ubuntu --cd /home/datnguyen/github/gaussian-webui -- rm -f _rewire.py; wsl.exe -d Ubuntu --cd /home/datnguyen/github/gaussian-webui -- grep -n \"custom_basis_section = prepare\\\\|resolve_basis_keyword\\(basis\\\\|write_custom_basis_section\\(f,\\\\|if custom_basis_section:\" utils.py)",
+      "PowerShell(wsl.exe -d Ubuntu --cd /home/datnguyen/github/gaussian-webui -- ./gaussian-env/bin/python _tmp_test_txt.py)",
+      "PowerShell(wsl.exe -d Ubuntu --cd /home/datnguyen/github/gaussian-webui -- ./gaussian-env/bin/python _tmp_test_stop.py)",
+      "PowerShell(wsl.exe -d Ubuntu --cd /home/datnguyen/github/gaussian-webui -- timeout 180 ./gaussian-env/bin/python _tmp_test_concurrency.py)"
     ]
   }
 }

@@ -8,10 +8,10 @@ from matplotlib.ticker import ScalarFormatter
 import gradio as gr
 import cclib
 import nglview
-from utils import get_files_in_working_directory, mol_from_gaussian_file, generate_ir_spectrum_interactive, generate_absorption_emission_spectrum_interactive, parse_nmr_shielding_constants, parse_nmr_jcouplings, calculate_chemical_shifts, generate_nmr_spectrum_interactive, parse_gaussian_geometry, compute_hydrogen_equivalence, compute_carbon_equivalence, build_nmr_peak_table, multiplicity_label
+from utils import get_files_in_working_directory, natural_sort_key, mol_from_gaussian_file, generate_ir_spectrum_interactive, generate_absorption_emission_spectrum_interactive, parse_nmr_shielding_constants, parse_nmr_jcouplings, calculate_chemical_shifts, generate_nmr_spectrum_interactive, parse_gaussian_geometry, compute_hydrogen_equivalence, compute_carbon_equivalence, build_nmr_peak_table, multiplicity_label
 
 def on_working_directory_file_list_change(working_directory_file_list):
-    output_file_names = [f for f in working_directory_file_list if f.endswith('.log') ]
+    output_file_names = sorted([f for f in working_directory_file_list if f.endswith('.log')], key=natural_sort_key)
     return gr.update(choices=output_file_names, value=output_file_names[0] if len(output_file_names) > 0 else None, interactive=True)
 
 def _parse_reference(value, default):

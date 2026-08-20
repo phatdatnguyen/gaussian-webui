@@ -9,6 +9,151 @@ def get_files_in_working_directory(working_directory_path):
     files = [f for f in os.listdir(working_directory_path) if not f.endswith('Zone.Identifier')]
     return files
 
+def natural_sort_key(name):
+    # Sort key that keeps embedded numbers in numeric order, so conformer_2 comes before conformer_10
+    return [int(part) if part.isdigit() else part.lower() for part in re.split(r'(\d+)', name)]
+
+def uses_basis_set(method_type):
+    # Semi-empirical and compound methods carry their own basis set, the route line has no basis
+    return method_type not in ("Semi-empirical", "Compound")
+
+def custom_basis_set_uses_ecp(custom_basis_set):
+    # Basis Set Exchange writes the pseudopotential block as "<element>-ECP", which Gaussian only
+    # reads when the route line says genecp instead of gen
+    lines = [line for line in custom_basis_set.splitlines() if not line.strip().startswith('!')]
+    return re.search(r'^\s*\S+-ECP\b', '\n'.join(lines), re.IGNORECASE | re.MULTILINE) is not None
+
+def resolve_basis_keyword(basis, custom_basis_section=None):
+    # A custom basis set is not named in the route section, it is spelled out after the molecule
+    # specification and referred to by the gen/genecp keyword. The keyword has to follow the section
+    # that actually gets written, a file whose pseudopotentials were all filtered out needs gen.
+    if not custom_basis_section:
+        return basis
+    return 'genecp' if custom_basis_set_uses_ecp(custom_basis_section) else 'gen'
+
+def gaussian_method_string(method_type, method_name, functional, basis):
+    if method_type == "HF":
+        return f'hf/{basis.lower()}'
+    elif method_type == "DFT":
+        return f'{functional.lower()}/{basis.lower()}'
+    elif method_type in ["MP2", "CCSD", "BD"]:
+        return f'{method_type.lower()}/{basis.lower()}'
+    elif method_type == "MP4":
+        return f'mp4(sdtq)/{basis.lower()}'
+    else: # method_type in ["Semi-empirical", "Compound"]:
+        return f'{method_name.lower()}'
+
+# A gen block is headed by the elements it defines, terminated by Gaussian's lone 0, e.g. "H     0"
+ELEMENT_LIST_PATTERN = re.compile(r'^\s*((?:-?[A-Za-z]{1,3}\s+)+)0\s*$')
+
+def parse_element_list(line):
+    match = ELEMENT_LIST_PATTERN.match(line)
+    if match is None:
+        return None
+    return [symbol.lstrip('-') for symbol in match.group(1).split()]
+
+def split_custom_basis_sections(custom_basis_set):
+    # Gaussian reads the gen section up to the first blank line, and Basis Set Exchange files open
+    # with a comment header followed by blank lines, which would cut the basis set off before the
+    # first element. Drop the comments and the blank lines, and tell the basis functions apart from
+    # the pseudopotentials, which have to stay in that order separated by a single blank line.
+    lines = [line.rstrip() for line in custom_basis_set.splitlines() if not line.strip().startswith('!')]
+
+    # group the lines the way the file separated them, on blank lines
+    blocks = []
+    current_block = []
+    for line in lines:
+        if line.strip():
+            current_block.append(line)
+        elif current_block:
+            blocks.append(current_block)
+            current_block = []
+    if current_block:
+        blocks.append(current_block)
+
+    is_ecp_block = lambda block: any(re.match(r'^\s*\S+-ECP\b', line, re.IGNORECASE) for line in block)
+
+    return ([line for block in blocks if not is_ecp_block(block) for line in block],
+            [line for block in blocks if is_ecp_block(block) for line in block])
+
+def split_basis_blocks(basis_lines):
+    # Basis function blocks are terminated by ****
+    blocks = []
+    current_block = []
+    for line in basis_lines:
+        current_block.append(line)
+        if line.strip() == '****':
+            blocks.append(current_block)
+            current_block = []
+    if current_block:
+        blocks.append(current_block)
+
+    return blocks
+
+def split_ecp_blocks(ecp_lines):
+    # Pseudopotential entries have no terminator, each one runs up to the next element list
+    blocks = []
+    current_block = []
+    for line in ecp_lines:
+        if parse_element_list(line) is not None and current_block:
+            blocks.append(current_block)
+            current_block = []
+        current_block.append(line)
+    if current_block:
+        blocks.append(current_block)
+
+    return blocks
+
+def keep_blocks_for_elements(blocks, elements):
+    # A basis set downloaded for the whole periodic table would otherwise define hundreds of
+    # elements the molecule does not contain
+    kept_blocks = []
+    defined_elements = set()
+    for block in blocks:
+        block_elements = next((parse_element_list(line) for line in block if parse_element_list(line) is not None), None)
+        if block_elements is None:
+            continue
+        matched = [symbol for symbol in block_elements if symbol.capitalize() in elements]
+        if not matched:
+            continue
+        # rewrite the header so a shared block does not drag in the elements that were filtered out
+        kept_blocks.append([f"{' '.join(matched)}     0" if parse_element_list(line) is not None else line for line in block])
+        defined_elements.update(symbol.capitalize() for symbol in matched)
+
+    return kept_blocks, defined_elements
+
+def build_custom_basis_section(mol, custom_basis_set):
+    elements = {atom.GetSymbol() for atom in mol.GetAtoms()}
+    basis_lines, ecp_lines = split_custom_basis_sections(custom_basis_set)
+
+    basis_blocks, defined_elements = keep_blocks_for_elements(split_basis_blocks(basis_lines), elements)
+    if not basis_blocks:
+        raise ValueError("The custom basis set file does not define any element of this molecule.")
+    missing_elements = sorted(elements - defined_elements)
+    if missing_elements:
+        raise ValueError(f"The custom basis set file has no basis functions for {', '.join(missing_elements)}.")
+
+    ecp_blocks, _ = keep_blocks_for_elements(split_ecp_blocks(ecp_lines), elements)
+
+    sections = ['\n'.join(line for block in basis_blocks for line in block)]
+    if ecp_blocks:
+        sections.append('\n'.join(line for block in ecp_blocks for line in block))
+
+    return '\n\n'.join(sections)
+
+def prepare_custom_basis_section(mol, custom_basis_set, method_type):
+    # Built before the input file is opened, so a basis set that does not cover the molecule fails
+    # without leaving a half written .gjf behind
+    if not custom_basis_set or not uses_basis_set(method_type):
+        return None
+    return build_custom_basis_section(mol, custom_basis_set)
+
+def write_custom_basis_section(f, custom_basis_section):
+    # The gen/genecp section goes straight after the blank line that ends the molecule specification
+    if not custom_basis_section:
+        return
+    f.write(custom_basis_section + '\n\n')
+
 def conformer_to_xyz_file(mol, conf_id, file_path, charge=0, multiplicity=1):
     # Get atom information
     atoms = mol.GetAtoms()
@@ -115,26 +260,19 @@ def mol_from_gaussian_file(filename):
 
     return mol
 
-def write_sp_gaussian_input(mol, file_name, method_type, method_name, functional='B3LYP', basis='6-31G(d)', charge=0, multiplicity=1, solvation=False, solvation_model=None, solvent=None, n_proc=4, memory=2):
+def write_sp_gaussian_input(mol, file_name, method_type, method_name, functional='B3LYP', basis='6-31G(d)', charge=0, multiplicity=1, solvation=False, solvation_model=None, solvent=None, n_proc=4, memory=2, custom_basis_set=None):
+    custom_basis_section = prepare_custom_basis_section(mol, custom_basis_set, method_type)
+
     # Open the file for writing
     with open(file_name + '.gjf', 'w') as f:
         # Link0 commands
         f.write(f'%NProcShared={n_proc}\n')
         f.write(f'%Mem={memory}GB\n')
         f.write(f'%Chk={file_name}.chk\n')
-        
+
         # Route section
-        if method_type == "HF":
-            method = f'hf/{basis.lower()}'
-        elif method_type == "DFT":
-            method = f'{functional.lower()}/{basis.lower()}'
-        elif method_type in ["MP2", "CCSD", "BD"]:
-            method = f'{method_type.lower()}/{basis.lower()}'
-        elif method_type == "MP4":
-            method = f'mp4(sdtq)/{basis.lower()}'
-        else: # method_type in ["Semi-empirical", "Compound"]:
-            method = f'{method_name.lower()}'
-       
+        method = gaussian_method_string(method_type, method_name, functional, resolve_basis_keyword(basis, custom_basis_section))
+
         route_section = f'#P {method} sp'
 
         if solvation:
@@ -144,10 +282,10 @@ def write_sp_gaussian_input(mol, file_name, method_type, method_name, functional
 
         # Title section
         f.write('Single Point Energy Calculation\n\n')
-        
+
         # Charge and multiplicity
         f.write(f'{charge} {multiplicity}\n')
-        
+
         # Atomic coordinates
         conf = mol.GetConformer()
         for atom in mol.GetAtoms():
@@ -157,39 +295,35 @@ def write_sp_gaussian_input(mol, file_name, method_type, method_name, functional
             f.write(f'{symbol:<2} {pos.x:>12.6f} {pos.y:>12.6f} {pos.z:>12.6f}\n')
         f.write('\n')  # Blank line to end the molecule specification
 
-def write_opt_gaussian_input(mol, file_name, method_type, method_name, functional='B3LYP', basis='6-31G(d,p)', charge=0, multiplicity=1, solvation=False, solvation_model=None, solvent=None, n_proc=4, memory=2):
+        # Custom basis set section
+        write_custom_basis_section(f, custom_basis_section)
+
+def write_opt_gaussian_input(mol, file_name, method_type, method_name, functional='B3LYP', basis='6-31G(d,p)', charge=0, multiplicity=1, solvation=False, solvation_model=None, solvent=None, n_proc=4, memory=2, custom_basis_set=None):
+    custom_basis_section = prepare_custom_basis_section(mol, custom_basis_set, method_type)
+
     # Open the file for writing
     with open(file_name + '.gjf', 'w') as f:
         # Link0 commands
         f.write(f'%NProcShared={n_proc}\n')
         f.write(f'%Mem={memory}GB\n')
         f.write(f'%Chk={file_name}.chk\n')
-        
+
         # Route section
-        if method_type == "HF":
-            method = f'hf/{basis.lower()}'
-        elif method_type == "DFT":
-            method = f'{functional.lower()}/{basis.lower()}'
-        elif method_type in ["MP2", "CCSD", "BD"]:
-            method = f'{method_type.lower()}/{basis.lower()}'
-        elif method_type == "MP4":
-            method = f'mp4(sdtq)/{basis.lower()}'
-        else: # method_type in ["Semi-empirical", "Compound"]:
-            method = f'{method_name.lower()}'
-       
+        method = gaussian_method_string(method_type, method_name, functional, resolve_basis_keyword(basis, custom_basis_section))
+
         route_section = f'#P {method} opt'
 
         if solvation:
             route_section += f' scrf=({solvation_model},solvent={solvent})'
         route_section += '\n\n'
         f.write(route_section)
-        
+
         # Title section
         f.write('Geometry Optimization\n\n')
-        
+
         # Charge and multiplicity
         f.write(f'{charge} {multiplicity}\n')
-        
+
         # Atomic coordinates
         conf = mol.GetConformer()
         for atom in mol.GetAtoms():
@@ -199,39 +333,35 @@ def write_opt_gaussian_input(mol, file_name, method_type, method_name, functiona
             f.write(f'{symbol:<2} {pos.x:>12.6f} {pos.y:>12.6f} {pos.z:>12.6f}\n')
         f.write('\n')  # Blank line to end the molecule specification
 
-def write_opt_freq_gaussian_input(mol, file_name, method_type, method_name, functional='B3LYP', basis='6-31G(d,p)', charge=0, multiplicity=1, solvation=False, solvation_model=None, solvent=None, n_proc=4, memory=2):
+        # Custom basis set section
+        write_custom_basis_section(f, custom_basis_section)
+
+def write_opt_freq_gaussian_input(mol, file_name, method_type, method_name, functional='B3LYP', basis='6-31G(d,p)', charge=0, multiplicity=1, solvation=False, solvation_model=None, solvent=None, n_proc=4, memory=2, custom_basis_set=None):
+    custom_basis_section = prepare_custom_basis_section(mol, custom_basis_set, method_type)
+
     # Open the file for writing
     with open(file_name + '.gjf', 'w') as f:
         # Link0 commands
         f.write(f'%NProcShared={n_proc}\n')
         f.write(f'%Mem={memory}GB\n')
         f.write(f'%Chk={file_name}.chk\n')
-        
+
         # Route section
-        if method_type == "HF":
-            method = f'hf/{basis.lower()}'
-        elif method_type == "DFT":
-            method = f'{functional.lower()}/{basis.lower()}'
-        elif method_type in ["MP2", "CCSD", "BD"]:
-            method = f'{method_type.lower()}/{basis.lower()}'
-        elif method_type == "MP4":
-            method = f'mp4(sdtq)/{basis.lower()}'
-        else: # method_type in ["Semi-empirical", "Compound"]:
-            method = f'{method_name.lower()}'
-       
+        method = gaussian_method_string(method_type, method_name, functional, resolve_basis_keyword(basis, custom_basis_section))
+
         route_section = f'#P {method} opt freq'
-        
+
         if solvation:
             route_section += f' scrf=({solvation_model},solvent={solvent})'
         route_section += '\n\n'
         f.write(route_section)
-        
+
         # Title section
         f.write('Geometry Optimization and Frequency Analysis\n\n')
-        
+
         # Charge and multiplicity
         f.write(f'{charge} {multiplicity}\n')
-        
+
         # Atomic coordinates
         conf = mol.GetConformer()
         for atom in mol.GetAtoms():
@@ -241,21 +371,23 @@ def write_opt_freq_gaussian_input(mol, file_name, method_type, method_name, func
             f.write(f'{symbol:<2} {pos.x:>12.6f} {pos.y:>12.6f} {pos.z:>12.6f}\n')
         f.write('\n')  # Blank line to end the molecule specification
 
-def write_uv_vis_gaussian_input(mol, file_name, method_type, method_name, functional='B3LYP', basis='6-31G(d,p)', n_states=10, charge=0, multiplicity=1, solvation=False, solvation_model=None, solvent=None, n_proc=4, memory=2):
+        # Custom basis set section
+        write_custom_basis_section(f, custom_basis_section)
+
+def write_uv_vis_gaussian_input(mol, file_name, method_type, method_name, functional='B3LYP', basis='6-31G(d,p)', n_states=10, charge=0, multiplicity=1, solvation=False, solvation_model=None, solvent=None, n_proc=4, memory=2, custom_basis_set=None):
+    custom_basis_section = prepare_custom_basis_section(mol, custom_basis_set, method_type)
+
     # Open the file for writing
     with open(file_name + '.gjf', 'w') as f:
         # Get method for both jobs
-        if method_type == "HF":
-            method = f'hf/{basis.lower()}'
-        elif method_type == "DFT":
-            method = f'{functional.lower()}/{basis.lower()}'
-        elif method_type in ["MP2", "CCSD", "BD"]:
-            method = f'{method_type.lower()}/{basis.lower()}'
-        elif method_type == "MP4":
-            method = f'mp4(sdtq)/{basis.lower()}'
-        else: # method_type in ["Semi-empirical", "Compound"]:
-            method = f'{method_name.lower()}'
-        
+        method = gaussian_method_string(method_type, method_name, functional, resolve_basis_keyword(basis, custom_basis_section))
+        # The second job reads the geometry from the checkpoint file, a custom basis set spelled out
+        # in the first job is stored there too and is picked up again with chkbasis
+        if custom_basis_section:
+            method_from_checkpoint = gaussian_method_string(method_type, method_name, functional, 'chkbasis')
+        else:
+            method_from_checkpoint = method
+
         # First job: ground-state optimization
         f.write(f'%NProcShared={n_proc}\n')
         f.write(f'%Mem={memory}GB\n')
@@ -274,13 +406,16 @@ def write_uv_vis_gaussian_input(mol, file_name, method_type, method_name, functi
             pos = conf.GetAtomPosition(idx)
             f.write(f'{sym:<2} {pos.x:>12.6f} {pos.y:>12.6f} {pos.z:>12.6f}\n')
         f.write('\n')
-        
+
+        # Custom basis set section
+        write_custom_basis_section(f, custom_basis_section)
+
         # Second job: TD single-point using geometry from checkpoint
         f.write('--Link1--\n')
         f.write(f'%NProcShared={n_proc}\n')
         f.write(f'%Mem={memory}GB\n')
         f.write(f'%Chk={file_name}.chk\n')
-        route2 = f'#P {method} TD(NStates={n_states}) Geom=AllCheck Guess=Read'
+        route2 = f'#P {method_from_checkpoint} TD(NStates={n_states}) Geom=AllCheck Guess=Read'
         if solvation:
             route2 += f' scrf=({solvation_model},solvent={solvent})'
         route2 += '\n\n'
@@ -289,19 +424,18 @@ def write_uv_vis_gaussian_input(mol, file_name, method_type, method_name, functi
         # When using Geom=AllCheck, coordinates block can be a placeholder
         f.write(f'{charge} {multiplicity}\n\n')
 
-def write_fluorescence_gaussian_input(mol, file_name, method_type, method_name, functional='B3LYP', basis='6-31G(d,p)', n_states=10, charge=0, multiplicity=1, solvation=False, solvation_model=None, solvent=None, n_proc=4, memory=2):
+def write_fluorescence_gaussian_input(mol, file_name, method_type, method_name, functional='B3LYP', basis='6-31G(d,p)', n_states=10, charge=0, multiplicity=1, solvation=False, solvation_model=None, solvent=None, n_proc=4, memory=2, custom_basis_set=None):
+    custom_basis_section = prepare_custom_basis_section(mol, custom_basis_set, method_type)
+
     # Get method for both jobs
-    if method_type == "HF":
-        method = f'hf/{basis.lower()}'
-    elif method_type == "DFT":
-        method = f'{functional.lower()}/{basis.lower()}'
-    elif method_type in ["MP2", "CCSD", "BD"]:
-        method = f'{method_type.lower()}/{basis.lower()}'
-    elif method_type == "MP4":
-        method = f'mp4(sdtq)/{basis.lower()}'
-    else: # method_type in ["Semi-empirical", "Compound"]:
-        method = f'{method_name.lower()}'
-    
+    method = gaussian_method_string(method_type, method_name, functional, resolve_basis_keyword(basis, custom_basis_section))
+    # The second job reads the geometry from the checkpoint file, a custom basis set spelled out in
+    # the first job is stored there too and is picked up again with chkbasis
+    if custom_basis_section:
+        method_from_checkpoint = gaussian_method_string(method_type, method_name, functional, 'chkbasis')
+    else:
+        method_from_checkpoint = method
+
     # First job: excited-state optimization (S1)
     with open(file_name + '_S1_Opt.gjf', 'w') as f:
         f.write(f'%NProcShared={n_proc}\n')
@@ -322,35 +456,35 @@ def write_fluorescence_gaussian_input(mol, file_name, method_type, method_name, 
             f.write(f'{sym:<2} {pos.x:>12.6f} {pos.y:>12.6f} {pos.z:>12.6f}\n')
         f.write('\n')
 
+        # Custom basis set section
+        write_custom_basis_section(f, custom_basis_section)
+
     # Second job: TD single point at optimized S1 geometry
     with open(file_name + '_S1_SP.gjf', 'w') as f:
         f.write(f'%NProcShared={n_proc}\n')
         f.write(f'%Mem={memory}GB\n')
         f.write(f'%Chk={file_name}.chk\n')
-        route2 = f'#P {method} TD(Singlets,NStates={n_states},Root=1) Geom=AllCheck Guess=Read'
+        route2 = f'#P {method_from_checkpoint} TD(Singlets,NStates={n_states},Root=1) Geom=AllCheck Guess=Read'
         if solvation:
             route2 += f' scrf=({solvation_model},solvent={solvent})'
         route2 += '\n\n'
         f.write(route2)
         f.write('TD single-point at optimized S1 geometry (emission energies)\n\n')
 
-def write_nmr_gaussian_input(mol, file_name, method_type, functional='B3LYP', basis='6-31G(d,p)', spin_spin_coupling=False, charge=0, multiplicity=1, solvation=False, solvation_model=None, solvent=None, n_proc=4, memory=2):
+def write_nmr_gaussian_input(mol, file_name, method_type, functional='B3LYP', basis='6-31G(d,p)', spin_spin_coupling=False, charge=0, multiplicity=1, solvation=False, solvation_model=None, solvent=None, n_proc=4, memory=2, custom_basis_set=None):
+    custom_basis_section = prepare_custom_basis_section(mol, custom_basis_set, method_type)
+
     # Open the file for writing
     with open(file_name + '.gjf', 'w') as f:
         # Link0 commands
         f.write(f'%NProcShared={n_proc}\n')
         f.write(f'%Mem={memory}GB\n')
         f.write(f'%Chk={file_name}.chk\n')
-        
+
         # Route section
-        if method_type == "HF":
-            method = f'hf/{basis.lower()}'
-        elif method_type == "DFT":
-            method = f'{functional.lower()}/{basis.lower()}'
-        elif method_type == "MP2":
-            method = f'mp2/{basis.lower()}'
-        else: # other methods
+        if method_type not in ["HF", "DFT", "MP2"]:
             raise Exception(f"Cannot use {method_type} method to predict NMR spectrum.")
+        method = gaussian_method_string(method_type, None, functional, resolve_basis_keyword(basis, custom_basis_section))
 
         if spin_spin_coupling:
             route_section = f'#P {method} NMR=(GIAO,spinspin)'
@@ -375,6 +509,9 @@ def write_nmr_gaussian_input(mol, file_name, method_type, functional='B3LYP', ba
             pos = conf.GetAtomPosition(idx)
             f.write(f'{symbol:<2} {pos.x:>12.6f} {pos.y:>12.6f} {pos.z:>12.6f}\n')
         f.write('\n')  # Blank line to end the molecule specification
+
+        # Custom basis set section
+        write_custom_basis_section(f, custom_basis_section)
 
 def lorentzian_ir(wavenumber, position, intensity, width=10):
     return intensity * (width ** 2) / ((wavenumber - position) ** 2 + width ** 2)

@@ -6,11 +6,16 @@ import gradio as gr
 from rdkit import Chem
 from rdkit.Chem import AllChem
 import nglview
-from utils import get_files_in_working_directory, mol_from_xyz_file, mol_from_gaussian_file, add_bonds
+from utils import get_files_in_working_directory, mol_from_xyz_file, mol_from_gaussian_file, add_bonds, natural_sort_key
+
+# Structures the 3D viewer can render, .log is handled separately because it is also a text file
+STRUCTURE_FILE_EXTENSIONS = ('.xyz', '.pdb', '.mol', '.mol2')
+# Plain text the viewer can open and save, .gbs and friends are what the custom basis set upload writes
+TEXT_FILE_EXTENSIONS = ('.txt', '.gbs', '.bas', '.basis', '.dat')
 
 def get_working_directories():
     base_path = "./data/"
-    return [d for d in os.listdir(base_path) if os.path.isdir(os.path.join(base_path, d))]
+    return sorted([d for d in os.listdir(base_path) if os.path.isdir(os.path.join(base_path, d))], key=natural_sort_key)
 
 def on_open_working_directory(working_directory):
     if working_directory is None or working_directory.strip() == "":
@@ -29,7 +34,7 @@ def on_file_list_change(working_directory_path):
     # Update the file dataframe
     file_info = []
     for f in files:
-        if f.endswith('.xyz') or f.endswith('.pdb') or f.endswith('.mol') or f.endswith('.mol2'):
+        if f.endswith(STRUCTURE_FILE_EXTENSIONS):
             file_type = "Structure file"
         elif f.endswith('.gjf'):
             file_type = "Input file"
@@ -39,6 +44,8 @@ def on_file_list_change(working_directory_path):
             file_type = "Log file"
         elif f.endswith('.cube'):
             file_type = "Cube file"
+        elif f.endswith(TEXT_FILE_EXTENSIONS):
+            file_type = "Text file"
         else:
             file_type = "Other File"
         
@@ -54,11 +61,11 @@ def on_file_list_change(working_directory_path):
 
 def on_select_file(evt: gr.SelectData):
     selected_file_name = evt.row_value[0]
-    if selected_file_name.endswith('.xyz') or selected_file_name.endswith('.pdb') or selected_file_name.endswith('.mol') or selected_file_name.endswith('.mol2') or selected_file_name.endswith('.log'):
+    if selected_file_name.endswith(STRUCTURE_FILE_EXTENSIONS + ('.log',)):
         selected_structure_file = selected_file_name
     else:
         selected_structure_file = None
-    if selected_file_name.endswith('.xyz') or selected_file_name.endswith('.pdb') or selected_file_name.endswith('.mol') or selected_file_name.endswith('.mol2') or selected_file_name.endswith('.gjf') or selected_file_name.endswith('.log'):
+    if selected_file_name.endswith(STRUCTURE_FILE_EXTENSIONS + ('.gjf', '.log') + TEXT_FILE_EXTENSIONS):
         selected_text_file = selected_file_name
     else:
         selected_text_file = None
