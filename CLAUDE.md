@@ -23,7 +23,21 @@ wsl.exe -d Ubuntu --cd /home/datnguyen/github/gaussian-webui -- ./gaussian-env/b
 
 `git` run from the Windows side over the UNC path fails with "dubious ownership" — run git inside WSL instead.
 
-There is **no test suite, linter, or `requirements.txt`**. Dependencies are pip-installed by hand per `Readme.md`; the versions that matter are pinned there (`gradio==5.50.0`, `nglview==4.0`, and `gradio_molecule2d --no-deps`). To check a change, run an ad-hoc script through the venv interpreter (`./gaussian-env/bin/python`) — handler functions are plain functions and can be called directly with a stub `progress` object that implements `__call__` and `tqdm`.
+There is **no linter or `requirements.txt`**. Dependencies are pip-installed by hand per `Readme.md`; the versions that matter are pinned there (`gradio==5.50.0`, `nglview==4.0`, and `gradio_molecule2d --no-deps`).
+
+Tests are stdlib `unittest`, no test dependency to install:
+
+```bash
+./gaussian-env/bin/python -m unittest discover -s tests -t .
+```
+
+~8 s without Gaussian. `tests/test_gaussian_integration.py` runs real `g16` jobs and skips
+itself when `g16` is not on `PATH`; a non-interactive shell needs `export g16root=$HOME/gaussian
+&& . $g16root/g16/bsd/g16.profile` first, since the setup lives in `~/.bashrc`. See `tests/README.md`.
+
+Handler functions are plain functions and can be called directly — `tests/helpers.py` has the
+stub `progress` object, a fake `g16`, and a temp-working-directory base class. Never import
+`webui` from a test: it deletes stale files and binds a port at import time.
 
 `webui.py` picks the first free port from 7860 upward and deletes stale `*.log`, `static/**/*.cube`, `static/**/*.xyz`, and `static/**/*.html` on startup.
 

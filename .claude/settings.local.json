@@ -30,7 +30,13 @@
       "PowerShell(wsl.exe -d Ubuntu --cd /home/datnguyen/github/gaussian-webui -- ./gaussian-env/bin/python _rewire.py; wsl.exe -d Ubuntu --cd /home/datnguyen/github/gaussian-webui -- rm -f _rewire.py; wsl.exe -d Ubuntu --cd /home/datnguyen/github/gaussian-webui -- grep -n \"custom_basis_section = prepare\\\\|resolve_basis_keyword\\(basis\\\\|write_custom_basis_section\\(f,\\\\|if custom_basis_section:\" utils.py)",
       "PowerShell(wsl.exe -d Ubuntu --cd /home/datnguyen/github/gaussian-webui -- ./gaussian-env/bin/python _tmp_test_txt.py)",
       "PowerShell(wsl.exe -d Ubuntu --cd /home/datnguyen/github/gaussian-webui -- ./gaussian-env/bin/python _tmp_test_stop.py)",
-      "PowerShell(wsl.exe -d Ubuntu --cd /home/datnguyen/github/gaussian-webui -- timeout 180 ./gaussian-env/bin/python _tmp_test_concurrency.py)"
+      "PowerShell(wsl.exe -d Ubuntu --cd /home/datnguyen/github/gaussian-webui -- timeout 180 ./gaussian-env/bin/python _tmp_test_concurrency.py)",
+      "PowerShell(wsl.exe -d Ubuntu -- bash -lc 'ls -d ~/gaussian 2>/dev/null; ls ~/gaussian/g16/g16 2>/dev/null; echo \"PATH has g16:\"; command -v g16')",
+      "PowerShell(wsl.exe -d Ubuntu -- bash -lc 'echo \"g16 resolves to: $\\(command -v g16\\)\"; echo \"GAUSS_EXEDIR=$GAUSS_EXEDIR\"; ls ~/gaussian/g16 | head')",
+      "PowerShell(wsl.exe -d Ubuntu --cd /home/datnguyen/github/gaussian-webui -- bash -l _tmp_env.sh)",
+      "PowerShell(wsl.exe -d Ubuntu --cd /home/datnguyen/github/gaussian-webui -- bash _tmp_env.sh)",
+      "PowerShell(tail *)",
+      "PowerShell(wsl.exe -d Ubuntu --cd /home/datnguyen/github/gaussian-webui -- bash _tmp_run_tests.sh)"
     ]
   }
 }
